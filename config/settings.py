@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 
 # DATA SET PATHS
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -192,3 +193,7 @@ OPL_ROW_INDEX_COL    = "opl_row_index"
 ACCESSORY_TITLES_COL = "accessory_titles"
 PRIMARY_PROGRAM_COL = "primary_program"
 SECONDARY_PROGRAM_COL = "secondary_program"
+
+
+QDRANT_URL = os.getenv("QDRANT_URL")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
