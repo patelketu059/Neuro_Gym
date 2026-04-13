@@ -3,6 +3,45 @@ import pandas as pd
 from tqdm.auto import tqdm
 
 
+
+def extract_coaching_texts(sessions_df: pd.DataFrame) -> dict[str, str]:
+    texts: dict[str, str] = {}
+
+    for aid, ath in tqdm(sessions_df.groupby('athlete_id'), desc = "Extracting Coaching texts"):
+        r = ath.iloc[0]
+        level               = str(r.get('training_level', ''))
+        dots                = float(r.get('dots', ''))
+        sex                 = str(r.get('sex', ''))
+        bodyweight          = float(r.get('bodyweight_kg', 0))
+        primary_program     = str(r.get('primary_program', ''))
+
+        squat_peak          = float(r.get('squat_peak_kg', 0))
+        bench_peak          = float(r.get('bench_peak_kg', 0))
+        deadlift_peak       = float(r.get('deadlift_peak_kg', 0))
+
+        squat_rows          = ath[ath['main_lift'] == 'Squat'].sort_values('week')
+        week1_main          = float(squat_rows.iloc[0]['main_lift_kg']) if not squat_rows.empty else 0
+        peak_main           = float(squat_rows['main_lift_kg'].max()) if not squat_rows.empty else 0
+        rpe_min             = float(ath['main_lift_rpe'].min())
+        rpe_max             = float(ath['main_lift_rpe'].max())
+
+        text = (
+            f"Athlete {aid} · {level.capitalize()} powerlifter · {sex} · "
+            f"{bodyweight:.1f}kg bodyweight · Dots {dots:.1f}\n"
+            f"Competition lifts: Squat {squat_peak:.1f}kg  Bench {bench_peak:.1f}kg  "
+            f"Deadlift {deadlift_peak:.1f}kg\n"
+            f"12-week block: opens at {week1_main:.1f}kg squat, peaks at {peak_main:.1f}kg "
+            f"in week 11.\n"
+            f"RPE progression: {rpe_min:.1f} → {rpe_max:.1f} across the block.\n"
+            f"Primary program: {primary_program}."
+        )
+
+        texts[aid] = text
+    
+    return texts
+
+
+
 def chunk_text(
         text : str,
         chunk_size : int = 1000,
@@ -124,6 +163,8 @@ def session_to_nl(
 
 
 #######################################################################################################
+
+
 
 def optimized_session_to_nl(
         df: pd.DataFrame,

@@ -25,6 +25,7 @@ GYM_COMBINED_PATH = CLEANED_DIR / "combined_600k_dataset.csv"
 SESSIONS_PATH = OUT_DIR / "sessions.csv"
 BLOCK_SUMMARY_PATH = OUT_DIR / "block_summary.csv"
 CHECKPOINT_PATH = DATA_DIR / "checkpoint.json"
+INGEST_CHECKPOINT = DATA_DIR / "ingest_checkpoint.json"
 
 
 # GENERATION PARAMETERS
