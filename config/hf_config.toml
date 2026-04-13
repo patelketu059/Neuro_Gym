@@ -1,0 +1,28 @@
+# hf_config.toml — HuggingFace push configuration
+
+[auth]
+token_env_var = "HF_TOKEN"         
+
+[repos]
+dataset_repo    = "k2p/gym-rag-dataset"    
+embeddings_repo = "k2p/gym-rag-embeddings"  
+
+[dataset]
+include_sessions      = true
+include_block_summary = true
+include_bm25_corpus   = false  
+include_pdfs          = true   #
+
+# Column-level redaction for licensing caution.
+# Set to true to strip these columns before pushing if 600K license is a concern.
+# Default false — CC BY-SA 4.0 attribution documented in dataset card.
+redact_program_columns = false   
+
+[embeddings]
+include_qdrant_snapshots = false  # data/qdrant_snapshots/*.snapshot
+include_bm25_index       = false  # data/bm25_index.pkl
+
+[upload]
+# Controls for the upload process
+commit_message_dataset    = "Dataset push — sessions, block_summary, pdfs"
+commit_message_embeddings = "Embeddings push — qdrant snapshots, bm25_index"

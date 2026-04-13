@@ -1,0 +1,73 @@
+# pdf_config.toml — controls for generate_pdfs.py
+# All settings here are the global defaults.
+# Per-athlete random variation is applied on top of these.
+# Set randomise = false to disable all variation and use defaults only.
+
+[variation]
+randomise        = true    # false → every athlete gets identical formatting
+seed_offset      = 9999    # added to athlete seed to decorrelate from chart seed
+
+[accent]
+# Accent colour is used for section headers, table headers, and chart highlights.
+# When randomise = true one of the palette entries is picked per athlete.
+# When randomise = false, default is always used.
+default          = "#C94A2A"    # muted coral
+palette          = [
+    "#C94A2A",   # coral
+    "#185FA5",   # blue
+    "#0F6E56",   # teal
+    "#BA7517",   # amber
+    "#7B3FA0",   # violet
+]
+
+[charts]
+# n_charts controls how many charts are embedded per PDF (2–3).
+# When randomise = true, each athlete gets n_charts chosen from chart_types.
+# Wide charts (rpe_heatmap, lift_progression) always go to page 2 alone.
+n_charts         = 3
+chart_types      = [
+    "lift_progression",
+    "peak_comparison",
+    "rpe_heatmap",
+    "load_histogram",
+    "volume_area",
+    "strength_radar",
+    "scatter_rpe_volume",
+    "phase_boxplot",
+]
+# Chart marker density: "low" = ms=1.0, "medium" = ms=2.0, "high" = ms=3.5
+# Affects scatter and line charts. Varied per athlete when randomise = true.
+marker_density   = "medium"
+
+[metrics_table]
+# Which row-set variant is shown. 0=competition, 1=progression, 2=intensity.
+# When randomise = true, variant is chosen per athlete.
+default_variant  = 0
+# Whether to show floor_week row in variants that include it.
+show_floor_week  = true
+
+[progression_table]
+# Which lift's delta column is shown: "Squat", "Deadlift", or "Bench".
+# When randomise = true, chosen per athlete.
+delta_lift       = "Squat"
+# Row height in points. Smaller = more compact; default 13.
+row_height       = 13
+
+[session_log]
+# Column order. Valid values: "Session", "Main lift", "RPE", "Accessories".
+# All four must be present. When randomise = true, RPE and Accessories can swap.
+columns          = ["Session", "Main lift", "RPE", "Accessories"]
+
+[description]
+# Paragraph order. Index 0 = block structure (always first).
+# Remaining indices 1-3 refer to: 1=gains, 2=RPE, 3=program.
+# When randomise = true, indices 1-3 are shuffled.
+para_order       = [0, 1, 2, 3]
+
+[typography]
+# Base font size for body text in points.
+body_font_size   = 8
+# Section label font size.
+section_font_size = 6.5
+# Row height for metrics table.
+metrics_row_height = 13
