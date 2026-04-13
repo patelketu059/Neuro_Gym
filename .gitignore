@@ -1,1 +1,35 @@
+# --- Data Exclusions (Critical for your repo) ---
+# This stops Git from tracking your large CSVs and PDFs
 data/
+*.zip
+*.csv
+*.pdf
+
+# --- Environment & Auth ---
+# Never push your Hugging Face or Database tokens
+.env
+hf_config.toml
+auth.json
+
+# --- Python Artifacts ---
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ipynb_checkpoints/
+
+# --- Virtual Environments ---
+venv/
+.venv/
+env/
+ENV/
+
+# --- VS Code & OS Metadata ---
+.vscode/
+.DS_Store
+Thumbs.db
+
+# --- Distribution / Logs ---
+dist/
+build/
+*.log
