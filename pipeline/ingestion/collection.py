@@ -81,7 +81,8 @@ def verify_collections(
     for name in COLLECTIONS:
         try:
             info = client.get_collection(name)
-            counts[name] = info.indexed_vectors_count or 0
+            count = getattr(info, "points_count", None) or getattr(info, "vectors_count", None) or 0
+            counts[name] = count
         except Exception:
             counts[name] = -1
     return counts
