@@ -104,7 +104,7 @@ def embed_pil_batch(
 def embed_text_batch(
         texts: list[str],
         model,
-        batch_size: int = 64
+        batch_size: int = 32
 ) -> list[list[float]]:
     
     import torch

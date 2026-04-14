@@ -20,18 +20,16 @@ def get_client(
 ) -> QdrantClient:
     
     try:
-        client = QdrantClient(
-            host = host,
-            port = port,
-            timeout = timeout
-        )
-        client.get_collections()
-        return client
-    except Exception as e:
+        ping_client = QdrantClient(host=host, port=port, timeout=5)
+        ping_client.get_collections()
+    except Exception as exc:
         raise ConnectionError(
-            f"Cannot connect to Qdrant at {host}:{port}"
-        ) from e
-    
+            f"Cannot connect to Qdrant at {host}:{port}. "
+            f"Start it with: docker run -d -p 6333:6333 "
+            f"-v $(pwd)/data/qdrant_storage:/qdrant/storage qdrant/qdrant"
+        ) from exc
+
+    return QdrantClient(host=host, port=port, timeout=timeout)
 
 def create_collections(
         client: QdrantClient,
