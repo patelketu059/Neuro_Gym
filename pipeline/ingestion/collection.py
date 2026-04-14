@@ -15,16 +15,14 @@ COLLECTIONS = [
 
 def get_client(
         host: str = 'localhost',
-        port: int = 6333,
-        timeout: int = 300,
-
+        port: int = 6333
 ) -> QdrantClient:
     
     try:
         client = QdrantClient(
             host = host,
             port = port,
-            timeout = timeout
+            timeout = 10
         )
         client.get_collections()
         return client
@@ -42,19 +40,30 @@ def create_collections(
     existing = {c.name for c in client.get_collections().collections}
     
     for name in COLLECTIONS:
-        if name in existing and recreate:
-            client.delete_collection(name)
+        if name in existing:
+            if recreate:
+                client.delete_collection(name)
+                print(f"  [qdrant] Dropped existing collection: {name}")
+            else:
+                print(f"  [qdrant] Collection already exists, skipping: {name}")
+                continue
 
-        client.create_collection(
-            collection_name = name,
-            vectors_config = VectorParams(
-                size = VECTOR_SIZE,
-                distance = Distance.COSINE
+        try: 
+            client.create_collection(
+                collection_name = name,
+                vectors_config = VectorParams(
+                    size = VECTOR_SIZE,
+                    distance = Distance.COSINE
+                )
             )
-        )
 
-        print(f"[INFO-QDRANT] - Created Collection: {name}  |   Dim: {VECTOR_SIZE}  COSINE")
+            print(f"[INFO-QDRANT] - Created Collection: {name}  |   Dim: {VECTOR_SIZE}  COSINE")
 
+        except Exception as e:
+            if 'already exists' in str(e) or '409' in str(e):
+                print('COLLECTION ALREADY EXISTS!')
+            else:
+                raise
     _create_payload_indexes(client)
 
 
