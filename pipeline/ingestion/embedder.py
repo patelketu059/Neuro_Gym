@@ -80,10 +80,31 @@ def embed_pdf_pages_batch(
     return vecs.float().cpu().tolist()
 
 
+
+def embed_pil_batch(
+        images: list,
+        texts: list[str],
+        model,
+) -> list[list[float]]:
+    
+    import torch
+    model.processor.p_max_length = 10240
+    has_text = any(t.strip() for t in texts)
+
+    with torch.inference_mode():
+        if has_text:
+            vecs = model.encode_documents(images=images, texts=texts)
+        else:
+            vecs = model.encode_documents(images=images)
+
+    vecs = _l2_normalise(vecs)
+    return vecs.float().cpu().tolist()
+
+
 def embed_text_batch(
         texts: list[str],
         model,
-        batch_size: int = 32
+        batch_size: int = 64
 ) -> list[list[float]]:
     
     import torch
