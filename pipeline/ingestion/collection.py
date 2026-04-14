@@ -15,14 +15,15 @@ COLLECTIONS = [
 
 def get_client(
         host: str = 'localhost',
-        port: int = 6333
+        port: int = 6333,
+        timeout: int = 300
 ) -> QdrantClient:
     
     try:
         client = QdrantClient(
             host = host,
             port = port,
-            timeout = 10
+            timeout = timeout
         )
         client.get_collections()
         return client
