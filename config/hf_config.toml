@@ -10,7 +10,7 @@ embeddings_repo = "k2p/gym-rag-embeddings"
 [dataset]
 include_sessions      = true
 include_block_summary = true
-include_bm25_corpus   = false  
+include_bm_corpus   = true  
 include_pdfs          = true   #
 
 # Column-level redaction for licensing caution.
@@ -19,8 +19,7 @@ include_pdfs          = true   #
 redact_program_columns = false   
 
 [embeddings]
-include_qdrant_snapshots = false  # data/qdrant_snapshots/*.snapshot
-include_bm25_index       = false  # data/bm25_index.pkl
+include_BM_index       = false  # data/BM_index.pkl
 
 [upload]
 # Controls for the upload process
