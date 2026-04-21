@@ -25,8 +25,6 @@ def get_client(
     except Exception as exc:
         raise ConnectionError(
             f"Cannot connect to Qdrant at {host}:{port}. "
-            f"Start it with: docker run -d -p 6333:6333 "
-            f"-v $(pwd)/data/qdrant_storage:/qdrant/storage qdrant/qdrant"
         ) from exc
 
     return QdrantClient(host=host, port=port, timeout=timeout)
@@ -42,9 +40,9 @@ def create_collections(
         if name in existing:
             if recreate:
                 client.delete_collection(name)
-                print(f"  [qdrant] Dropped existing collection: {name}")
+                print(f"[INFO-QDRANT] Dropped existing collection: {name}")
             else:
-                print(f"  [qdrant] Collection already exists, skipping: {name}")
+                print(f"[INFO-QDRANT] Collection already exists, skipping: {name}")
                 continue
 
         try: 
