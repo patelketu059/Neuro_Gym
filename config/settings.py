@@ -199,3 +199,8 @@ SECONDARY_PROGRAM_COL = "secondary_program"
 
 QDRANT_URL = os.getenv("QDRANT_URL")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+HF_TOKEN = os.getenv("HF_TOKEN")
+
+
+QDRANT_HOST = 'localhost'
+QDRANT_PORT = 6333
