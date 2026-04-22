@@ -1,5 +1,7 @@
 from __future__ import annotations
 from qdrant_client import QdrantClient
+# from qdrant_client.models import Filter, FieldCondition, MatchValue
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 COLLECTIONS = ['gym_images', 'gym_text', 'gym_tables']
 
@@ -38,17 +40,27 @@ def dense_search(
 def dense_search_all(
         query_vector: list[float],
         client: QdrantClient,
+        collections: list[str] | None = None,
         top_k: int = 20,
         filters: dict | None = None
 ) -> list[list[dict]]:
     
-    res = []
-    for col in COLLECTIONS:
-        res.append(
-            dense_search(
-            query_vector,
-            collection = col,
-            top_k = top_k,
-            filters = None
-            ))
-    return res
+    cols = collections or COLLECTIONS
+
+    res: dict[str, list[dict]] = {}
+    with ThreadPoolExecutor(max_workers = len(cols)) as pool:
+        futures = {
+            pool.submit(dense_search, query_vector, col, client, top_k, filters): col 
+            for col in cols
+        }
+        
+        for fut in as_completed(futures):
+            col = futures[fut]
+            try:
+                res[col] = fut.result()
+            except Exception as e:
+                print(f"[INFO-DENSE-SEARCH] - Failed {col} search: {e}")
+                res[col] = []
+
+        return [res.get(col, []) for col in cols]
+

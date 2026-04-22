@@ -23,6 +23,52 @@ def deduplicate_athlete(
 _CHARS_TO_TOKEN = 4
 _MAX_TEXT_TOKENS = 4096
 
+
+def _build_athlete_profile(payload: dict) -> str:
+    aid   = payload.get("athlete_id", "unknown")
+    level = payload.get("training_level", "")
+    dots  = payload.get("dots", "")
+    prog  = payload.get("primary_program", "")
+    sq    = payload.get("squat_peak_kg", "")
+    be    = payload.get("bench_peak_kg", "")
+    dl    = payload.get("deadlift_peak_kg", "")
+
+    lines = [f"ATHLETE PROFILE: {aid}"]
+    meta  = []
+    if level: meta.append(f"Level: {level}")
+    if dots:  meta.append(f"Dots: {dots}")
+    if meta:  lines.append("  " + " | ".join(meta))
+    lifts = []
+    if sq: lifts.append(f"Squat {sq}kg")
+    if be: lifts.append(f"Bench {be}kg")
+    if dl: lifts.append(f"Deadlift {dl}kg")
+    if lifts: lines.append("  Competition lifts: " + " | ".join(lifts))
+    if prog:  lines.append(f"  Program: {prog}")
+
+    return "\n".join(lines)
+
+
+def _passage_block(
+        text: str,
+        collection: str,
+        payload: dict,
+        score: float,
+        budget_chars: int
+) -> str:
+
+    aid    = payload.get("athlete_id", "unknown")
+    source = _source_label(collection, payload)
+    header = (
+        f"--- SOURCE: {aid} | {source} | score {score:.3f} ---"
+    )
+    if len(text) > budget_chars:
+        text = text[:budget_chars].rsplit(" ", 1)[0] + " [truncated]"
+
+    return f"{header}\n{text}"
+
+
+
+
 def assemble_context(
         deduped_results: list[dict],
         max_tokens: int = _MAX_TEXT_TOKENS
@@ -33,6 +79,7 @@ def assemble_context(
     athlete_ids:  list[str] = []
     sources: list[dict] = []
     tokens_used: int = 0
+    seen_aids: set[str] = set()
 
     for r in deduped_results:
         payload    = r.get("payload", {})
@@ -46,23 +93,36 @@ def assemble_context(
         if pdf_path and pdf_path not in pdf_paths:
             pdf_paths.append(pdf_path)
 
+
+        if aid and aid not in seen_aids and tokens_used < max_tokens:
+            profile = _build_athlete_profile(payload)
+            profile_tokens = len(profile) // _CHARS_TO_TOKEN
+            if tokens_used + profile_tokens < max_tokens:
+                text_part.append(profile)
+                tokens_used += profile_tokens
+                seen_aids.add(aid)
+
+
         text = payload.get("text", "").strip()
         if text and tokens_used < max_tokens:
-            budget_left = max_tokens - tokens_used
-            chars_left = budget_left * _CHARS_TO_TOKEN
-            if len(text) > chars_left:
-                text = text[:chars_left].resplit(" ", 1)[0] + "[truncated]"
+            budget_chars = (max_tokens - tokens_used) * _CHARS_TO_TOKEN
+            block = _passage_block(text, collection, payload, score, budget_chars)
+            block_tokens = len(block) // _CHARS_TO_TOKEN
+            if block_tokens > 0:
+                text_part.append(block)
+                tokens_used += block_tokens
 
-            source_label = _source_label(collection, payload)
-            passage = f"[{source_label}]\n{text}"
-            text_part.append(passage)
-            tokens_used += len(passage) // _CHARS_TO_TOKEN
-
-        source = {
+        source: dict = {
             'athlete_id': aid,
             'collection': collection,
             'score': round(score, 4),
-            'pdf_path': pdf_path
+            'pdf_path': pdf_path,
+            'payload': {
+                k: payload.get(k)
+                for k in ("training_level", "dots", "squat_peak_kg",
+                          "bench_peak_kg", "deadlift_peak_kg", "primary_program")
+                if payload.get(k) is not None
+            }
         }
 
         if collection == 'gym_tables':
