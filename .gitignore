@@ -5,6 +5,12 @@ data/
 *.csv
 *.pdf
 
+hf_pull/
+*.npy
+*.zip
+*.pdf
+*.json
+*.pkl
 # --- Environment & Auth ---
 # Never push your Hugging Face or Database tokens
 .env
