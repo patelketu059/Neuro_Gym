@@ -126,7 +126,8 @@ def embed_text_batch(
 def embed_query_api(
         text: str,
         image_path: str | None = None,
-        api_key: str | None = None
+        api_key: str | None = None,
+        mode: str = 'query'
 ) -> list[float]:
     
     import requests
@@ -141,7 +142,7 @@ def embed_query_api(
     if image_path is None:
         payload = {
             "model": "nvidia/llama-nemotron-embed-vl-1b-v2:free",
-            "input": f"query: {text}",
+            "input": f"{mode}: {text}",
             "encoding_format": "float"
         }
     else:
@@ -160,7 +161,7 @@ def embed_query_api(
                 {
                     "content": [
                         {"type": "text",
-                         "text": f"query: {text}"},
+                         "text": f"{mode}: {text}"},
                         {"type": "image_url",
                          "image_url": {"url": data_url}},
                     ]
@@ -186,6 +187,7 @@ def embed_query(
     text: str,
     image_path: str | None = None,
     api_key: str | None = None,
+    mode: str = 'query'
 ) -> list[float]:
 
     return embed_query_api(

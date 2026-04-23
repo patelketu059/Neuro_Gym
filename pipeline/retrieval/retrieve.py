@@ -1,6 +1,7 @@
 from __future__ import annotations
 import time 
 from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 TEXT_COLLECTIONS  = ["gym_text", "gym_tables"]
@@ -32,20 +33,68 @@ def get_config(name: str) -> RetrievalConfig:
     return CONFIGS[name]
 
 
+def multi_retrieve(
+        queries: list[str],
+        client,
+        config: RetrievalConfig | None = None,
+        openrouter_api_key: str | None = None,
+        top_k: int = 30,
+        filters: dict | None = None
+) -> list[list[dict]]:
+    
+    from pipeline.ingestion.embedder import embed_query
+    from pipeline.retrieval.dense_search import dense_search_all
+
+    cfg = config or CONFIGS[DEFAULT_CONFIG]
+    text_collections = [c for c in cfg.collections if c!= 'gym_images']
+    if not text_collections: return []
+
+    def _search_one(q: str) -> list[dict]:
+        vec = embed_query(q, api_key = openrouter_api_key)
+        if not vec: return []
+        results = dense_search_all(
+            query_vector = vec,
+            client = client,
+            collections = text_collections,
+            top_k = top_k,
+            filters = filters
+        )
+
+        flat: list[dict] = []
+        for r in results:
+            flat.extend(r)
+        return flat
+    
+    results_list: list[list[dict]] = []
+    with ThreadPoolExecutor(max_workers = min(len(queries), 4)) as pool:
+        futures = {pool.submit(_search_one, q) : q for q in queries}
+        for fut in as_completed(futures):
+            try:
+                hits = fut.result()
+                if hits: 
+                    results_list.append(hits)
+            except Exception as e: 
+                print(f"[INFO-Retrieve] - Multi Retreive sub-query failure: {e}")
+
+    return results_list
+
+
 def retrieve(
         query: str,
         bm25,
         corpus: list[dict],
         client,
-        config: RetrievalConfig | None = None,
-        query_image_path: str | None = None,
-        reranker_model = None,
-        top_k_hybrid: int = 50,
-        top_k_rerank: int = 20,
-        top_k_athletes: int = 5,
-        max_context_tokens: int = 4096,
-        openrouter_api_key: str | None = None,
-        filters: dict | None = None
+        config: RetrievalConfig | None              = None,
+        query_image_path: str | None                = None,
+        hyde_vector: list[float] | None             = None,
+        extra_dense_lists: list[list[dict]] | None  = None,
+        reranker_model                              = None,
+        top_k_hybrid: int                           = 50,
+        top_k_rerank: int                           = 20,
+        top_k_athletes: int                         = 5,
+        max_context_tokens: int                     = 4096,
+        openrouter_api_key: str | None              = None,
+        filters: dict | None                        = None
 ) -> dict:
     
     from pipeline.ingestion.embedder import embed_query
@@ -82,7 +131,7 @@ def retrieve(
             print(f'[INFO-Retrieve] - Imaged Embed skipped: {e}')
             image_vector = text_vector
 
-
+    search_vector = hyde_vector if hyde_vector else text_vector
     dense_results: list[list[dict]] = []
 
     if text_collections and text_vector:
@@ -109,7 +158,10 @@ def retrieve(
             if img_results:
                 dense_results.append(img_results)
 
+    if extra_dense_lists:
+        dense_results.extend(extra_dense_lists)
 
+        
     bm25_results: list[dict] = []
     if cfg.use_bm25:
         bm25_results = sparse_search(query, bm25, corpus, 
