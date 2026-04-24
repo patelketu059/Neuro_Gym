@@ -97,21 +97,27 @@ class ConversationSummaryBufferMemory:
 
         if self.gemini is not None:
             try:
-                return self.gemini.generate_content(prompt,
-                                                    generation_config = cfg).text.strip()
+                from google.genai import types
+                return self.gemini.models.generate_content(
+                    model = self.gemini_model,
+                    contents = prompt,
+                    config = types.GenerateContentConfig(**cfg)).text.strip()
             
             except Exception:
                 pass
 
         try:
-            import google.generativeai as genai
+            from google import genai
+            from google.genai import types
             api_key = os.environ.get("GEMINI_API_KEY", "")
             if not api_key:
                 return self._fallback_summary(messages)
-            genai.configure(api_key = api_key)
-
-            return genai.GenerativeModel(self.gemini_model).generate_content(
-                prompt, generation_config = cfg
+            client = genai.Client(api_key = api_key)
+            
+            return client.models.generate_content(
+                model   = self.gemini_model,
+                contents= prompt,
+                config  = types.GenerateContentConfig(**cfg),
             ).text.strip()
         except Exception:
             return self._fallback_summary(messages)

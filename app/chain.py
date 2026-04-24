@@ -162,12 +162,15 @@ def generation(inputs: dict) -> dict:
 
     content_parts.append(f"\nUSER: {query}\nASSISTANT:")
 
-    response = gemini.generate_content(
-        content_parts,
-        generation_config = {
-            "temperature": 0.3,
-            "max_output_tokens": 1024
-        }
+    from google.genai import types
+    response = gemini.models.generate_content(
+        model    = "gemini-2.5-flash",
+        contents = content_parts,
+        config   = types.GenerateContentConfig(
+            system_instruction = SYSTEM_PROMPT,
+            temperature        = 0.3,
+            max_output_tokens  = 1024,
+        ),
     )
     answer = response.text.strip()
     memory.add_user_message(query)

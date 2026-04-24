@@ -164,13 +164,12 @@ TRAINING RECORD PASSAGE:\
 
 def _generate_hyde_document(query: str, gemini) -> str | None:
 
-    try: 
-        response = gemini.generate_content(
-            _HYDE_PROMPT.format(query = query),
-            generation_config = {
-                'temperature': 0.4,
-                'max_output_tokens': 400
-            }
+    try:
+        from google.genai import types
+        response = gemini.models.generate_content(
+            model   = "gemini-2.0-flash",
+            contents= _HYDE_PROMPT.format(query=query),
+            config  = types.GenerateContentConfig(temperature=0.4, max_output_tokens=400),
         )
         text = response.text.strip()
         return text if text else None
