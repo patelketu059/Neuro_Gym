@@ -52,11 +52,11 @@ async def lifespan(app: FastAPI):
     print(f"[INFO-APP] - BM25 Loaded | {len(app.state.corpus)}")
 
 
-    import google.generativeai as genai
+    from google import genai
     api_key = os.environ.get("GEMINI_API_KEY", "")
+    print(api_key)
     if api_key:
-        genai.configure(api_key = api_key)
-        app.state.gemini = genai.GenerativeModel('gemini-2.5-flash')
+        app.state.gemini = genai.Client(api_key = api_key)
         print(f"[INFO-APP] - Gemini 2.5 Flast connected")
 
     else:
