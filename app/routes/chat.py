@@ -1,7 +1,8 @@
 from __future__ import annotations
 import tempfile
+import traceback
 from pathlib import Path
-from fastapi import APIRouter, Form, Request, UploadFile, File
+from fastapi import APIRouter, Form, Request, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -12,10 +13,18 @@ class ChatResponse(BaseModel):
     sources: list[dict]
     pdf_paths: list[str]
     athlete_ids: list[str]
-    config_name: str
-    retrieval_ms : int
-    generation_ms: int
     session_id: str
+
+    retrieval_ms: int
+    generation_ms: int
+
+    config_name: str
+    intent : str = 'factual'
+    query_rewritten: bool = False
+    retrieval_query: str = ""
+    hyde_document: str = ""
+    sub_queries: list[str] = []
+
 
 
 @router.post("/chat", response_model = ChatResponse)
@@ -49,6 +58,10 @@ async def chat(
                             pdf_dir          = state.pdf_dir,
             )
             return ChatResponse(**result)
+    except Exception as e:
+        import traceback
+        traceback.print_ext()
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         if tmp_image_path:
             Path(tmp_image_path).unlink(missing_ok = True)

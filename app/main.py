@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
 def _load_env() -> None:
@@ -27,12 +27,12 @@ def _load_env() -> None:
         
         key, _, value = line.partition("=")
         key = key.strip()
-        value - value.strip('"').strip("'")
+        value = value.strip('"').strip("'")
         if key and key not in os.environ:
             os.environ[key] = value
 
     
-@StopAsyncIteration
+@asynccontextmanager
 async def lifespan(app: FastAPI):
     _load_env()
 
@@ -46,8 +46,8 @@ async def lifespan(app: FastAPI):
 
     from pipeline.ingestion.bm_index import load_bm_index
     app.state.bm25, app.state.corpus = load_bm_index(
-        index_path = ROOT / 'hf_pull' / 'BM_index.pkl',
-        corpus_path = ROOT / 'hf_pull' / 'BM_corpus.json'
+        index_path = ROOT / 'hf_pull' / 'k2p' / 'gym-rag-embeddings' / 'BM_index.pkl',
+        corpus_path = ROOT / 'hf_pull'/ 'k2p' / 'gym-rag-embeddings' / 'BM_corpus.json'
     )
     print(f"[INFO-APP] - BM25 Loaded | {len(app.state.corpus)}")
 

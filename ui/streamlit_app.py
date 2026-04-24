@@ -85,7 +85,8 @@ def _init_state():
         "pdf_paths": [],
         "pdf_index": 0,
         "config_name": "F — all + BM25",
-        "prefill_query": ""
+        "prefill_query": "",
+        "uploaded_image": None
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -112,92 +113,50 @@ def _render_pdf_page(pdf_path: str, page: int = 0, dpi: int = 150) -> bytes | No
     
 
 with st.sidebar:
-    st.markdown('## Gym RAG')
-    st.caption("Lifting Coach Chatbot")
+    st.markdown("## Gym RAG")
+    st.caption("Powerlifting coaching chatbot")
     st.divider()
 
-    st.markdown("**Retrieval Config**")
-    config_name = st.selectbox(
-        "Config",
-        RETRIEVAL_CONFIGS,
-        index = RETRIEVAL_CONFIGS.index(st.session_state.config_name),
-        label_visibility = "collapsed"
-    )
-    st.session_state.config_name = config_name
-
-    config_descriptions = {
-        "A — images only":     "Dense search on PDF pages only",
-        "B — text only":       "Dense search on coaching text only",
-        "C — tables only":     "Dense search on NL week strings only",
-        "D — all dense":       "All 3 collections, no BM25",
-        "E — tables + BM25":   "Tables + BM25, RRF fusion",
-        "F — all + BM25":      "All collections + BM25, RRF (default)",
-        "G — hybrid + rerank": "Full hybrid + cross-encoder reranker",
-        "H — BM25 only":       "Keyword search only, no dense",
-    }
-    st.caption(config_descriptions.get(config_name, ""))
-    st.divider()
-
-
-    st.markdown("**Golden Eval Questions**")
-    selected_q = st.selectbox(
-        "Load a test question",
-        ["-- Select -- "] + GOLDEN_QUESTIONS,
-        label_visibility = 'collapsed'
-    )
-
-    if selected_q != "-- Select -- ":
-        st.session_state.prefill_query = selected_q
+    st.markdown(f"**Session** `{st.session_state.session_id}`")
+    if st.button("Clear conversation", use_container_width=True):
+        try:
+            requests.delete(f"{FASTAPI_URL}/chat/{st.session_state.session_id}", timeout=5)
+        except Exception:
+            pass
+        st.session_state.messages   = []
+        st.session_state.pdf_paths  = []
+        st.session_state.pdf_index  = 0
+        st.session_state.uploaded_image = None
+        st.session_state.session_id = str(uuid.uuid4())[:8]
         st.rerun()
 
     st.divider()
 
-
-    st.markdown("**Upload Training Chart**")
-    uploaded_image = st.file_uploader(
-        "Chart Image",
-        type = ['png', 'jpg', 'jpeg', 'svg'],
-        label_visibility = 'collapsed',
-        key = f"uploader_{st.session_state.uploader_key}"
-    )
-
-    if uploaded_image:
-        st.image(uploaded_image, use_column_width = True)
-        if st.button("Clear Image", use_container_width = True):
-            st.session_state.uploader_key += 1
-            st.rerun()
-
-    st.divider()
-
-
-    try: 
-        health = requests.get(f"{FASTAPI_URL}/health", timeout = 3)
-        if health.status_code == 200:
-            data = health.json()
+    try:
+        h = requests.get(f"{FASTAPI_URL}/health", timeout=3)
+        if h.status_code == 200:
+            data   = h.json()
             status = data.get("status", "unknown")
             if status == "ok":
-                st.success("API Connected")
+                st.success("API connected")
             else:
                 st.warning(f"API {status}")
-            
             for col, count in data.get("qdrant", {}).items():
                 if isinstance(count, int):
-                    st.caption(f"{col}: {count} vectors")
-            
-            if data.get("gemini_loaded"):
-                st.caption("Gemini: Ready")
-            else:
-                st.caption("Gemini: Not Configured")
-
+                    st.caption(f"{col}: {count:,} vectors")
+            st.caption("Gemini: ready" if data.get("gemini_loaded") else "Gemini: not configured")
         else:
-            st.error("API ERROR")
+            st.error("API error")
     except Exception:
-        st.error("API Unreachable: Start FastAPI")
+        st.error("API unreachable — start FastAPI first")
         st.caption("uvicorn app.main_day4:app --port 8000")
 
+# Toolbar state lives in session_state so it persists across reruns
+uploaded_image = st.session_state.get("uploaded_image")
 
 
-chat_col, pdf_col = st.columns([3, 2], gaps = 'large')
+
+chat_col, pdf_col = st.columns([3, 2], gap = 'large')
 with pdf_col:
     st.markdown("### PDF Viewer")
 
@@ -248,7 +207,7 @@ with pdf_col:
 
         dot_html = "".join(
             f"<span style='display:inline-block;width:8px;height:8px;border-radius:50%;"
-            f"background:{'#185FA5' if i == idx else '#ccc'};margin:0 3px'></span>"
+            f"background:{'#185FA5' if i == index else '#ccc'};margin:0 3px'></span>"
             for i in range(n)
         )
         st.markdown(
@@ -327,6 +286,69 @@ with chat_col:
                             )
                             st.divider()
 
+    CONFIG_DESC = {
+        "A — images only":     "PDF pages only",
+        "B — text only":       "Coaching text only",
+        "C — tables only":     "Week data only",
+        "D — all dense":       "All collections, no BM25",
+        "E — tables + BM25":   "Tables + BM25 keyword",
+        "F — all + BM25":      "All + BM25 (default)",
+        "G — hybrid + rerank": "Full hybrid + reranker",
+        "H — BM25 only":       "Keyword search only",
+    }
+
+
+    tb_left, tb_mid, tb_right = st.columns([3, 3, 2], gap="small")
+
+    with tb_left:
+        with st.popover("⚙️  " + st.session_state.config_name, use_container_width=True):
+            st.markdown("**Retrieval config**")
+            for cfg in RETRIEVAL_CONFIGS:
+                active = cfg == st.session_state.config_name
+                label  = ("✓ " if active else "   ") + cfg
+                if st.button(label, key=f"cfg_{cfg}", use_container_width=True):
+                    st.session_state.config_name = cfg
+                    st.rerun()
+                st.caption(CONFIG_DESC.get(cfg, ""))
+
+    with tb_mid:
+        with st.popover("📋  Eval questions", use_container_width=True):
+            st.markdown("**Golden eval set**")
+            for i, q in enumerate(GOLDEN_QUESTIONS):
+                short = q[:60] + "…" if len(q) > 60 else q
+                if st.button(short, key=f"gq_{i}", use_container_width=True):
+                    st.session_state.prefill_query = q
+                    st.rerun()
+
+    with tb_right:
+        with st.popover("📎  Attach image", use_container_width=True):
+            st.markdown("**Upload training chart**")
+            f = st.file_uploader(
+                "chart",
+                type=["png", "jpg", "jpeg"],
+                label_visibility="collapsed",
+                key=f"uploader_{st.session_state.uploader_key}",
+            )
+            if f is not None:
+                st.session_state.uploaded_image = f
+                st.image(f, use_container_width=True)
+            if st.session_state.uploaded_image and st.button(
+                "Remove image", use_container_width=True
+            ):
+                st.session_state.uploaded_image = None
+                st.session_state.uploader_key  += 1
+                st.rerun()
+
+    pills = []
+    if st.session_state.config_name != "F — all + BM25":
+        pills.append(f"⚙️ {st.session_state.config_name}")
+    if st.session_state.get("uploaded_image"):
+        pills.append(f"📎 {st.session_state.uploaded_image.name}")
+    if pills:
+        st.caption("  ·  ".join(pills))
+
+    uploaded_image = st.session_state.get("uploaded_image")
+
 
     prefill = st.session_state.get('prefill_query', '')
     st.session_state.prefill_query = ""
@@ -339,37 +361,34 @@ with chat_col:
     if not prompt and prefill:
         prompt = prefill
     
-    if prompt: 
-        st.session_state.messages.append({"role": "user",
-                                          "content": prompt})
-        
+    if prompt:
+        st.session_state.messages.append({"role": "user", "content": prompt})
         with chat_col:
             with st.chat_message("user"):
                 st.markdown(prompt)
 
         with chat_col:
-            with st.chat_message('assistant'):
-                with st.spinner('Retrieving and Generating...'):
+            with st.chat_message("assistant"):
+                with st.spinner("Retrieving and generating..."):
                     try:
                         files = {}
-                        data = {
-                            "query": prompt,
-                            "session_id": st.session_state.session_id,
-                            "config_name": st.session_state.config_name
+                        data  = {
+                            "query":       prompt,
+                            "session_id":  st.session_state.session_id,
+                            "config_name": st.session_state.config_name,
                         }
-
-                        if uploaded_image: 
-                            files['image'] = {
+                        if uploaded_image:
+                            files["image"] = (
                                 uploaded_image.name,
                                 uploaded_image.getvalue(),
-                                uploaded_image.type
-                            }
-                        
+                                uploaded_image.type,
+                            )
+
                         resp = requests.post(
                             f"{FASTAPI_URL}/chat",
-                            data = data,
+                            data  = data,
                             files = files or None,
-                            timeout = 120
+                            timeout = 120,
                         )
 
                         if resp.status_code == 200:
@@ -409,10 +428,9 @@ with chat_col:
 
                 st.markdown(answer)
                 st.caption(
-                    f"Retrieval: {retrieval_ms} ms  |  Generation: {generation_ms} ms  "
-                    f"|  Config: {config_used}"
+                    f"Retrieval: {retrieval_ms} ms  ·  Generation: {generation_ms} ms  "
+                    f"·  Config: {config_used}"
                 )
-                
 
                 if sources:
                     with st.expander(f"Sources — {len(sources)} results"):
