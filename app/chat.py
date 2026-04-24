@@ -31,7 +31,7 @@ async def chat(
 
     try:
         if image and image.filename:
-            suffix = Path(image.filename).suffix pr '.png'
+            suffix = Path(image.filename).suffix or '.png'
             with tempfile.NamedTemporaryFile(delete = False, suffix = suffix) as tmp: 
                 tmp.write(await image.read())
                 tmp_image_path = tmp.name
