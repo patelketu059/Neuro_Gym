@@ -2,7 +2,7 @@ from __future__ import annotations
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
-
+import sys
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -11,6 +11,10 @@ from fastapi.middleware.cors import CORSMiddleware
 # uvicorn app.main_day4:app --host 0.0.0.0 --port 8000 --reload
 
 ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+
 def _load_env() -> None:
     env_path = ROOT / '.env'
     if not env_path.is_file(): return 
@@ -80,7 +84,7 @@ app.add_middleware(
 )
 
 from app.routes.chat import router as chat_router
-from app.routes.health import router as health_router
+from app.routes.health_status import router as health_router
 
 app.include_router(chat_router)
 app.include_router(health_router)
