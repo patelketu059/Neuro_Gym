@@ -3,7 +3,6 @@ import base64
 import io
 import time
 from pathlib import Path
-from langsmith import traceable
 
 SYSTEM_PROMPT = """You are an expert powerlifting coach with access to a structured \
 database of athlete training records.
@@ -66,7 +65,6 @@ def _image_file_to_b64(image_path: str) -> tuple[str, str] | None:
 
 
 
-@traceable(name = 'gym-rag-retrival')
 def retrieval(inputs: dict) -> dict:
     from pipeline.retrieval.retrieve import retrieve, multi_retrieve
 
@@ -97,7 +95,6 @@ def retrieval(inputs: dict) -> dict:
     return {**inputs, "context": context}
 
 
-@traceable(name = 'gym-rag-generation')
 def generation(inputs: dict) -> dict:
 
     query      = inputs["query"]   

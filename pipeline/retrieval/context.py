@@ -1,4 +1,4 @@
-from __future__ import __annotations__
+from __future__ import annotations
 
 def deduplicate_athlete(
         results: list[dict],

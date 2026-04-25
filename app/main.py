@@ -54,10 +54,10 @@ async def lifespan(app: FastAPI):
 
     from google import genai
     api_key = os.environ.get("GEMINI_API_KEY", "")
-    print(api_key)
+    # print(api_key)
     if api_key:
         app.state.gemini = genai.Client(api_key = api_key)
-        print(f"[INFO-APP] - Gemini 2.5 Flast connected")
+        print(f"[INFO-APP] - Gemini 2.5 Flash connected")
 
     else:
         app.state.gemini - None

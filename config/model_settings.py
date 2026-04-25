@@ -6,7 +6,7 @@ EMBEDDING_MODEL_ID = "nvidia/llama-nemotron-embed-vl-1b-v2"
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 
-COLLECTIONS = ["gym_images", "gym_text", "gym_tables"]
+ALL_COLLECTIONS = ["gym_images", "gym_text", "gym_tables"]
 
 RETRUEVAL_CONFIGS: dict[str, dict] = {
     "dense_images_only": {

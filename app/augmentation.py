@@ -1,6 +1,5 @@
 from __future__ import annotations
 import re
-from langsmith import traceable
 import json
 from concurrent.futures import ThreadPoolExecutor
 
@@ -101,15 +100,17 @@ def _call_combined(query: str, history: list[dict], gemini) -> dict:
         for m in context_msgs
     )
     prompt = _COMBINED_PROMPT.format(history=history_str, query=query)
-    try: 
-        response = gemini.generate_content(
-            prompt,
-            generation_config = {
-                'temperature': 0.0,
-                'max_output_tokens': 200
-            }
+    try:
+        from google.genai import types
+        response = gemini.models.generate_content(
+            model    = "gemini-2.0-flash",
+            contents = prompt,
+            config   = types.GenerateContentConfig(
+                temperature       = 0.0,
+                max_output_tokens = 200,
+            ),
         )
-        
+
         raw = response.text.strip()
         raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw, flags=re.MULTILINE).strip()
         data = json.loads(raw)
@@ -177,7 +178,6 @@ def _generate_hyde_document(query: str, gemini) -> str | None:
         return None
     
 
-@traceable(name = 'gym-rag-augmentation')
 def augment(inputs: dict) -> dict:
     raw_query = inputs['query']
     memory = inputs['memory']
@@ -212,13 +212,13 @@ def augment(inputs: dict) -> dict:
     def _run_hyde():
         return _generate_hyde_document(pronoun_resolved, gemini)
     
-    if use_hyde: 
+    if use_hyde:
         with ThreadPoolExecutor(max_workers = 2) as pool:
             f_combined = pool.submit(_run_combined)
             f_hyde = pool.submit(_run_hyde)
-            combined_results = f_combined.result()
+            combined_result = f_combined.result()
             hyde_document = f_hyde.result()
-    
+
     else:
         combined_result = _run_combined()
 
