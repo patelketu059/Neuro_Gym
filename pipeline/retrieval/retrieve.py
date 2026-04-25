@@ -19,14 +19,14 @@ CONFIGS: dict[str, RetrievalConfig] = {
     "A — images only":      RetrievalConfig("A — images only",      ["gym_images"],                  use_bm25=False),
     "B — text only":        RetrievalConfig("B — text only",         ["gym_text"],                    use_bm25=False),
     "C — tables only":      RetrievalConfig("C — tables only",       ["gym_tables"],                  use_bm25=False),
-    "D — all dense":        RetrievalConfig("D — all dense",         COLLECTIONS,                 use_bm25=False),
+    "D — all dense":        RetrievalConfig("D — all dense",         ALL_COLLECTIONS,                 use_bm25=False),
     "E — tables + BM25":    RetrievalConfig("E — tables + BM25",     ["gym_tables"],                  use_bm25=True),
-    "F — all + BM25":       RetrievalConfig("F — all + BM25",        COLLECTIONS,                 use_bm25=True),
-    "G — hybrid + rerank":  RetrievalConfig("G — hybrid + rerank",   COLLECTIONS,                 use_bm25=True,  use_reranker=True),
+    "F — all + BM25":       RetrievalConfig("F — all + BM25",        ALL_COLLECTIONS,                 use_bm25=True),
+    "G — hybrid + rerank":  RetrievalConfig("G — hybrid + rerank",   ALL_COLLECTIONS,                 use_bm25=True,  use_reranker=True),
     "H — BM25 only":        RetrievalConfig("H — BM25 only",         [],                              use_bm25=True),
 }
 
-DEFAULT_CONFIG = "F - all + BM25"
+DEFAULT_CONFIG = "F — all + BM25"  # em-dash, matches CONFIGS keys
 def get_config(name: str) -> RetrievalConfig:
     if name not in CONFIGS:
         raise ValueError(f"Unknown config '{name}'. Valid: {list(CONFIGS)}")
@@ -131,16 +131,20 @@ def retrieve(
             print(f'[INFO-Retrieve] - Imaged Embed skipped: {e}')
             image_vector = text_vector
 
+    # HyDE vector (passage-mode embedding of a synthesised training-record
+    # passage) lives in document space; text_vector is in query space. When
+    # HyDE is present, prefer it for searching gym_text/gym_tables — that's
+    # the entire point of HyDE.
     search_vector = hyde_vector if hyde_vector else text_vector
     dense_results: list[list[dict]] = []
 
-    if text_collections and text_vector:
+    if text_collections and search_vector:
         text_results = dense_search_all(
-            query_vector = text_vector,
+            query_vector = search_vector,
             client = client,
             collections = text_collections,
             top_k = top_k_hybrid,
-            filters = filters
+            filters = filters,
         )
         dense_results.extend(text_results)
 

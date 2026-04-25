@@ -94,17 +94,31 @@ def _init_state():
 
 _init_state()
 
+PDF_ARCHIVE_DIR = ROOT / "data" / "pdfs" / "pdfs_archive"
+
+
+def _resolve_pdf_path(pdf_path: str) -> Path:
+    """Backend hands us values like 'pdfs/athlete_00042.pdf' or just
+    'athlete_00042.pdf'. The on-disk layout is data/pdfs/pdfs_archive/<basename>.
+    Strip any directory prefix and join under PDF_ARCHIVE_DIR. Absolute paths
+    pass through unchanged."""
+    p = Path(pdf_path)
+    if p.is_absolute():
+        return p
+    return PDF_ARCHIVE_DIR / p.name
+
+
 def _render_pdf_page(pdf_path: str, page: int = 0, dpi: int = 150) -> bytes | None:
     try:
         import fitz
-        full_path = (ROOT / "data" / "pdfs" / "pdfs_archive" / pdf_path) if not Path(pdf_path).is_absolute() else Path(pdf_path)
+        full_path = _resolve_pdf_path(pdf_path)
         if not full_path.is_file():
             return None
-        
+
         doc = fitz.open(str(full_path))
         if page >= len(doc):
             page = 0
-        
+
         mat = fitz.Matrix(dpi / 72, dpi / 72)
         pix = doc[page].get_pixmap(matrix = mat)
         return pix.tobytes('png')
@@ -162,7 +176,7 @@ with pdf_col:
 
     pdf_paths = st.session_state.pdf_paths
     if not pdf_paths:
-        st.info("Send a query for retrievel athelete PDFs")
+        st.info("Send a query for retrievel athlete PDFs")
     else:
         n = len(pdf_paths)
         index = st.session_state.pdf_index
@@ -188,19 +202,25 @@ with pdf_col:
                 st.session_state.pdf_index = min(n - 1, index + 1)
                 st.rerun()
 
-        pdf_full = ROOT / 'data' / 'pdfs' / 'pdf_archive' / pdf_paths[index]
+        pdf_full = _resolve_pdf_path(pdf_paths[index])
         n_pages = 1
-        try: 
+        try:
             import fitz
             if pdf_full.is_file():
                 n_pages = len(fitz.open(str(pdf_full)))
         except Exception:
             pass
 
-        page_index = st.slider("Page", 0, max(0, n_pages - 1), 0, key = [f'page_{index}'])
+        if n_pages > 1:
+            page_index = st.slider(
+                "Page", 0, n_pages - 1, 0, key = f'page_{index}'
+            )
+        else:
+            page_index = 0
+            st.caption(f"Page 1 of {n_pages}")
         png = _render_pdf_page(pdf_paths[index], page = page_index)
         if png:
-            st.image(png, use_column_width = True)
+            st.image(png, width = "stretch")
         else:
             st.warning(f"Could not render {pdf_paths[index]}")
 
@@ -362,6 +382,12 @@ with chat_col:
         prompt = prefill
     
     if prompt:
+        # Clear stale PDFs the moment a new query is fired, so the
+        # right-hand column blanks while the spinner is running rather
+        # than displaying the previous query's results.
+        st.session_state.pdf_paths = []
+        st.session_state.pdf_index = 0
+
         st.session_state.messages.append({"role": "user", "content": prompt})
         with chat_col:
             with st.chat_message("user"):
@@ -466,10 +492,11 @@ with chat_col:
                             )
                             st.divider()
 
-        # Update PDF viewer
-        if pdf_paths_new:
-            st.session_state.pdf_paths = pdf_paths_new[:5]
-            st.session_state.pdf_index = 0
+        # Update PDF viewer — always assign, even when the response had
+        # no PDFs or hit an error. Avoids the previous query's PDFs
+        # sticking around as stale state on empty/error responses.
+        st.session_state.pdf_paths = (pdf_paths_new or [])[:5]
+        st.session_state.pdf_index = 0
 
         st.session_state.messages.append({
             "role":          "assistant",

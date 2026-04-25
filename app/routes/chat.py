@@ -32,7 +32,7 @@ async def chat(
     request:            Request,
     query:              str         = Form(...),
     session_id:         str         = Form(default = 'default'),
-    config_name:        str         = Form(default = 'F - all + BM25'),
+    config_name:        str         = Form(default = 'F — all + BM25'),
     image:              UploadFile  = File(default = None)
 ):
     state = request.app.state
@@ -41,23 +41,23 @@ async def chat(
     try:
         if image and image.filename:
             suffix = Path(image.filename).suffix or '.png'
-            with tempfile.NamedTemporaryFile(delete = False, suffix = suffix) as tmp: 
+            with tempfile.NamedTemporaryFile(delete = False, suffix = suffix) as tmp:
                 tmp.write(await image.read())
                 tmp_image_path = tmp.name
 
-            from app.chain import run_chain
-            result = run_chain(
-                            query            = query,
-                            session_id       = session_id,
-                            bm25             = state.bm25,
-                            corpus           = state.corpus,
-                            client           = state.qdrant,
-                            gemini           = state.gemini,
-                            config_name      = config_name,
-                            query_image_path = tmp_image_path,
-                            pdf_dir          = state.pdf_dir,
-            )
-            return ChatResponse(**result)
+        from app.chain import run_chain
+        result = run_chain(
+                        query            = query,
+                        session_id       = session_id,
+                        bm25             = state.bm25,
+                        corpus           = state.corpus,
+                        client           = state.qdrant,
+                        gemini           = state.gemini,
+                        config_name      = config_name,
+                        query_image_path = tmp_image_path,
+                        pdf_dir          = state.pdf_dir,
+        )
+        return ChatResponse(**result)
     except Exception as e:
         import traceback
         traceback.print_exc()

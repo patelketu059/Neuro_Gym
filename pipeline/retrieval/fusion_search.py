@@ -20,7 +20,7 @@ def RRF(
             rrf_contrib = 1.0 / (k + rank)
             scores[rid] = scores.get(rid, 0.0) + rrf_contrib
 
-            if rid not in best or result['scores'] > best['rid']['score']:
+            if rid not in best or result.get('score', 0.0) > best[rid].get('score', 0.0):
                 best[rid] = result
 
     merged = sorted(scores.keys(), key = lambda x: scores[x], reverse = True)

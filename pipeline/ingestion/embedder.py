@@ -169,18 +169,18 @@ def embed_query_api(
             ],
         }
 
-        resp = requests.post(
-            "https://openrouter.ai/api/v1/embeddings",
-            headers = {
-                "Authorization": {f"Bearer {api_key}"},
-                "Content-Type": "application/json"
-            },
-            json = payload,
-            timeout = 30
-        )
+    resp = requests.post(
+        "https://openrouter.ai/api/v1/embeddings",
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        json = payload,
+        timeout = 30,
+    )
 
-        resp.raise_for_status()
-        return resp.json()["data"][0]['embedding']
+    resp.raise_for_status()
+    return resp.json()["data"][0]["embedding"]
 
 
 def embed_query(
@@ -191,6 +191,8 @@ def embed_query(
 ) -> list[float]:
 
     return embed_query_api(
-        text, 
+        text,
         image_path = image_path,
-        api_key = api_key)
+        api_key = api_key,
+        mode = mode,
+    )

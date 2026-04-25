@@ -17,7 +17,7 @@ def sparse_search(
 
     return [
         {
-            "id": f"{r['athlete_id']}_w{[r['week']]}"
+            "id": f"{r['athlete_id']}_w{[r['week']]}",
             "score": float(r.get('bm25_score', 0)),
             "collection": "bm25",
             "payload": {
