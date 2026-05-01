@@ -13,25 +13,26 @@ def dense_search(
         top_k: int = 20,
         filters: dict | None = None
 ) -> list[dict]:
-    
 
-    qdrant_filter = filters
-    results = client.search(
+    # qdrant-client 1.10+ removed .search(); .query_points() is the
+    # replacement universal endpoint. It returns a QueryResponse whose
+    # .points field is the list of ScoredPoint (id, score, payload).
+    response = client.query_points(
         collection_name = collection,
-        query_vector = query_vector,
-        limit = top_k,
-        query_filter = qdrant_filter,
-        with_payload = True
+        query           = query_vector,
+        limit           = top_k,
+        query_filter    = filters,
+        with_payload    = True,
     )
 
     return [
         {
-            "id": str(res.id),
-            "score": float(res.score),
+            "id":         str(res.id),
+            "score":      float(res.score),
             "collection": collection,
-            "payload": res.payload or {}
+            "payload":    res.payload or {},
         }
-        for res in results
+        for res in response.points
     ]
 
 
