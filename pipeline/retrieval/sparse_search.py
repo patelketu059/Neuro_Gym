@@ -1,19 +1,30 @@
 from __future__ import annotations
-from pipeline.ingestion.bm_index import bm25_search 
+from pipeline.ingestion.bm_index import bm25_search
+
+_VALID_LEVELS = {'elite', 'advanced', 'intermediate', 'novice'}
+
 
 def sparse_search(
         query: str,
         bm25,
         corpus: list[dict],
-        top_k: int = 30
+        top_k: int = 30,
+        filters: dict | None = None
 ) -> list[dict]:
-    
-    raw = bm25_search(
-        query,
-        bm25,
-        corpus,
-        top_k = top_k
-    )
+
+    level_set: set[str] = set()
+    if filters:
+        for lvl in filters.get('training_levels', []):
+            if lvl in _VALID_LEVELS:
+                level_set.add(lvl)
+
+    # Fetch more candidates so post-filtering still yields top_k hits
+    fetch_k = top_k * 4 if level_set else top_k
+    raw = bm25_search(query, bm25, corpus, top_k=fetch_k)
+
+    if level_set:
+        raw = [r for r in raw if str(r.get('training_level', '')).lower() in level_set]
+        raw = raw[:top_k]
 
     return [
         {
