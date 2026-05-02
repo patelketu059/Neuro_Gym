@@ -71,13 +71,18 @@ def retrieval(inputs: dict) -> dict:
     sub_queries = inputs.get('sub_queries', [])
     hyde_vector = inputs.get('hyde_vector', [])
 
+    # Build retrieval filter from augmentation output (list of levels, may be empty)
+    training_levels = inputs.get('training_levels') or []
+    retrieval_filters = {'training_levels': training_levels} if training_levels else None
+
     extra_dense: list[list[dict]] = []
     if sub_queries:
         extra_dense = multi_retrieve(
             queries = sub_queries,
             client = inputs['client'],
             config = inputs.get('retrieval_config'),
-            openrouter_api_key = inputs.get('openrouter_api_key')
+            openrouter_api_key = inputs.get('openrouter_api_key'),
+            filters = retrieval_filters,
         )
 
     context = retrieve(
@@ -91,6 +96,7 @@ def retrieval(inputs: dict) -> dict:
         extra_dense_lists  = extra_dense if extra_dense else None,
         reranker_model     = inputs.get("reranker_model"),
         top_k_athletes     = inputs.get("top_k_athletes", 5),
+        filters            = retrieval_filters,
     )
     return {**inputs, "context": context}
 
@@ -188,7 +194,7 @@ def run_chain(
         corpus:             list[dict],
         client,
         gemini,
-        config_name:        str = "F - all + BM25",
+        config_name:        str = "F — all + BM25",
         query_image_path:   str | None = None,
         reranker_model          = None,
         pdf_dir:            str = '',

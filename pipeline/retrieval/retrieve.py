@@ -168,8 +168,9 @@ def retrieve(
         
     bm25_results: list[dict] = []
     if cfg.use_bm25:
-        bm25_results = sparse_search(query, bm25, corpus, 
-                                     top_k = top_k_hybrid)
+        bm25_results = sparse_search(query, bm25, corpus,
+                                     top_k = top_k_hybrid,
+                                     filters = filters)
         
     all_lists = dense_results + ([bm25_results])
     fused = RRF(all_lists)[:top_k_hybrid]
