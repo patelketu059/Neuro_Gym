@@ -17,19 +17,10 @@ if str(ROOT) not in sys.path:
 
 def _load_env() -> None:
     env_path = ROOT / '.env'
-    if not env_path.is_file(): return 
-
-    for line in env_path.read_text().splitlines():
-        line = line.strip()
-
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        
-        key, _, value = line.partition("=")
-        key = key.strip()
-        value = value.strip('"').strip("'")
-        if key and key not in os.environ:
-            os.environ[key] = value
+    if not env_path.is_file():
+        return
+    from dotenv import load_dotenv
+    load_dotenv(env_path, override=False)
 
     
 @asynccontextmanager
@@ -60,7 +51,7 @@ async def lifespan(app: FastAPI):
         print(f"[INFO-APP] - Gemini 2.5 Flash connected")
 
     else:
-        app.state.gemini - None
+        app.state.gemini = None
         print(f"[INFO-APP] - Gemini Key not set")
 
     app.state.pdf_dir = str(ROOT / 'data' / 'pdfs' / "pdfs_archive")

@@ -197,12 +197,7 @@ def optimized_session_to_nl(
 
     for lift in lift_order:
         r = lift_lookup.get(lift)
-        # Get lift row
-        # row = wk_rows[wk_rows['main_lift'] == lift]
-        # Check for empty row
         if not r: continue
-        # get first row, extract kg, rpe, delta, pct
-        # r = row.iloc[0]
         kg = r['main_lift_kg']
         rpe = r['main_lift_rpe']
         delta = r.get('main_lift_delta_kg', None)
@@ -219,15 +214,11 @@ def optimized_session_to_nl(
         lines.append(
             f"{lift}: {kg:.1f}kg{delta_str}  |  RPE {rpe:.1f}{pct_str}"
         )
-    # print(lines)
-    # print(wk_rows['day_label'])
+
     day_order = ['Lower A', 'Upper A', 'Lower B', 'Upper B']
     for day_label in day_order:
-        # get label row
-        row = wk_rows[wk_rows['day_label'] == day_label]
-        if row.empty: continue
-        r = row.iloc[0]
-
+        r = day_lookup.get(day_label)
+        if not r: continue
 
         names = str(r["accessories"]).split("|")
         sets_ = str(r.get("accessory_sets", "")).split("|")

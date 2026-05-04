@@ -7,7 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from config.model_settings import RETRUEVAL_CONFIGS, COLLECTIONS
+from config.model_settings import RETRIEVAL_CONFIGS, COLLECTIONS
 
 def retrieve_for_config(
         query: str,
@@ -62,7 +62,7 @@ def reciprocal_rank(
         k: int
 ) -> float:
     
-    for rank, aid in enumerate(athlete_ids[:k], start = 1)
+    for rank, aid in enumerate(athlete_ids[:k], start=1):
         if aid == correct:
             return 1.0 / rank
     return 0.0
@@ -80,5 +80,6 @@ def run(
         qdrant_host: str,
         qdrant_port: int
 ) -> None:
-    
-    
+    raise NotImplementedError(
+        "run() is a placeholder — use eval/retrieval_eval.py for the full harness."
+    )

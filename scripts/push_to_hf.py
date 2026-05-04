@@ -65,8 +65,7 @@ def _push(folder: Path,
         folder_path = str(folder),
         repo_id = repo_id,
         repo_type = 'dataset',
-        delete_patterns = "*"
-        )
+    )
 
     print(f"Uploaded to: https://huggingface.co/datasets/{repo_id}")
 

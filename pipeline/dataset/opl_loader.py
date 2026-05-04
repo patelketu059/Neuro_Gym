@@ -10,12 +10,6 @@ from config.settings import (
 
 def _classify_DOTS(dots: float) -> str:
 
-    DOTS_THRESHOLDS = {
-        "elite":        510,
-        "advanced":     410,
-        "intermediate": 310,
-    }
-
     if dots >= DOTS_THRESHOLDS['elite']:
         return "elite"
     if dots >= DOTS_THRESHOLDS['advanced']:

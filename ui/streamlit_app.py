@@ -359,7 +359,7 @@ with chat_col:
             )
             if f is not None:
                 st.session_state.uploaded_image = f
-                st.image(f, width="stretch")
+                st.image(f, use_column_width=True)
             if st.session_state.uploaded_image and st.button(
                 "Remove image", use_container_width=True
             ):
@@ -506,7 +506,7 @@ with pdf_col:
 
         png = _render_pdf_page(pdf_paths[index], page=page_index)
         if png:
-            st.image(png, width="stretch")
+            st.image(png, use_column_width=True)
         else:
             st.warning(f"Could not render {pdf_paths[index]}")
 

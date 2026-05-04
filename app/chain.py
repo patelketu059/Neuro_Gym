@@ -4,6 +4,8 @@ import io
 import time
 from pathlib import Path
 
+from config.model_settings import GEMINI_GENERATION_MODEL
+
 SYSTEM_PROMPT = """You are an expert powerlifting coach with access to a structured \
 database of athlete training records.
 
@@ -113,7 +115,7 @@ def generation(inputs: dict) -> dict:
 
 
     t0 = time.perf_counter()
-    content_parts: list = [SYSTEM_PROMPT]
+    content_parts: list = []
 
     for msg in memory.get_history():
         content_parts.append(f"\n {msg['role'].upper()} : {msg['content']}")
@@ -167,7 +169,7 @@ def generation(inputs: dict) -> dict:
 
     from google.genai import types
     response = gemini.models.generate_content(
-        model    = "gemini-2.5-flash",
+        model    = GEMINI_GENERATION_MODEL,
         contents = content_parts,
         config   = types.GenerateContentConfig(
             system_instruction = SYSTEM_PROMPT,
