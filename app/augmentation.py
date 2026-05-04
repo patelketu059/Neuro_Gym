@@ -1,7 +1,10 @@
 from __future__ import annotations
+import logging
 import re
 import json
 from concurrent.futures import ThreadPoolExecutor
+
+from config.model_settings import GEMINI_AUX_MODEL
 
 ATHLETE_ID_RE = re.compile(r'athlete_\d{5}')
 INTENT_LABELS = ("factual", "trend", "comparison", "coaching", "visual")
@@ -101,8 +104,7 @@ QUESTION: {query}
 def _call_combined(query: str, history: list[dict], gemini) -> dict:
 
     summary_block = [m for m in history if m['content'].startswith("[Summary")]
-    live_turns    = [m for m in history if not m["content"].startswith("[Summary")
-                     and m.get("content") != "Understood. Continuing from that context."]
+    live_turns    = [m for m in history if not m["content"].startswith("[Summary")]
     
     context_msgs = summary_block + live_turns[-3:]
 
@@ -114,7 +116,7 @@ def _call_combined(query: str, history: list[dict], gemini) -> dict:
     try:
         from google.genai import types
         response = gemini.models.generate_content(
-            model    = "gemini-2.0-flash",
+            model    = GEMINI_AUX_MODEL,
             contents = prompt,
             config   = types.GenerateContentConfig(
                 temperature       = 0.0,
@@ -156,7 +158,8 @@ def _call_combined(query: str, history: list[dict], gemini) -> dict:
             'training_levels': training_levels,
         }
 
-    except Exception:
+    except Exception as e:
+        logging.warning("[augmentation] LLM query-analysis call failed: %s", e)
         return {
             'intent': 'factual',
             'rewritten_query': query,
@@ -192,7 +195,8 @@ def _generate_hyde_document(query: str, gemini) -> str | None:
         )
         text = response.text.strip()
         return text if text else None
-    except Exception:
+    except Exception as e:
+        logging.warning("[augmentation] HyDE generation failed: %s", e)
         return None
     
 

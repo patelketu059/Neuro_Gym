@@ -16,7 +16,7 @@ def deduplicate_athlete(
             seen[aid] = {**r, "_dedup_score": score}
             ordered.append(aid)
         elif score > seen[aid]['_dedup_score']:
-            seen[aid] = {**r, "dedup_score": score}
+            seen[aid] = {**r, "_dedup_score": score}
     return [seen[aid] for aid in ordered[:top_k]]
 
 

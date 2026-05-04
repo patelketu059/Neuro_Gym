@@ -29,7 +29,7 @@ def dense_search(
         filters: dict | None = None
 ) -> list[dict]:
 
-    qdrant_filter = _build_qdrant_filter(filters) if isinstance(filters, dict) else filters
+    qdrant_filter = _build_qdrant_filter(filters)
 
     response = client.query_points(
         collection_name = collection,

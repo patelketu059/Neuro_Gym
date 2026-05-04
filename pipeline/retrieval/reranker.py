@@ -6,7 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from config.settings import PDF_DIR
 
 
-def load_reanker():
+def load_reranker():
     import torch
     from transformers import AutoModel, AutoProcessor
 
@@ -85,8 +85,7 @@ def _score_text_pairs(
         logits = model(**inputs).logits.squeeze(-1)
 
     scores = logits.float().cpu().tolist()
-    scores = [scores]
-    
+
     return dict(zip(indices, scores))
 
 
@@ -121,8 +120,7 @@ def _score_image_pairs(
         logits = model(**inputs).logits.squeeze(-1)
 
     scores = logits.float().cpu().tolist()
-    scores = [scores]
-    
+
     return dict(zip(indices, scores))
 
 def _metadata_text(result: dict) -> str:

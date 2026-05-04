@@ -108,7 +108,7 @@ def _upsert_collection(
         or getattr(info, "vectors_count", None)
         or 0
     )
-    print(f"[INFO-QDRANT] - Collection {collection} Uploaded | {getattr(info, 'final', None)}")
+    print(f"[INFO-QDRANT] - Collection {collection} Uploaded | {final}")
 
 
 
@@ -119,15 +119,16 @@ def load_to_Qdrant(
         qdrant_port: int | None
 ) -> None:
     
+    separator = "=" * 50
     print(f"[INFO-QDRANT] - Connecting to QDRANT...")
-    client = get_client()
+    client = get_client(host=qdrant_host, port=qdrant_port)
     print(f"[INFO-QDRANT] - Connected to QDRANT")
-    print(f"\n {"="*50}\n")
+    print(f"\n{separator}\n")
 
     print(f"[INFO-QDRANT] - Creating Collections...")
     create_collections(client, recreate = True)
     print(f"[INFO-QDRANT] - Collections Created")
-    print(f"\n{"="*50}\n")
+    print(f"\n{separator}\n")
 
 
 
@@ -153,7 +154,7 @@ def load_to_Qdrant(
             collection,
             points
         )
-        print(f"\n{"="*50}\n")
+        print(f"\n{separator}\n")
 
 def main() -> None:
     load_to_Qdrant(

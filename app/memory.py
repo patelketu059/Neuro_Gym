@@ -3,6 +3,8 @@ import os
 from dataclasses import dataclass
 from typing import Literal
 
+from config.model_settings import GEMINI_AUX_MODEL
+
 
 @dataclass
 class Message:
@@ -22,7 +24,7 @@ class ConversationSummaryBufferMemory:
             gemini = None,
             k: int = 8,
             max_token_budget: int = 2000,
-            gemini_model: str = 'gemini-2.0-flash'
+            gemini_model: str = GEMINI_AUX_MODEL
     ):
         self.session_id       = session_id
         self.gemini           = gemini
@@ -47,11 +49,6 @@ class ConversationSummaryBufferMemory:
             msgs.append({
                 "role": "user",
                 "content": f"[Summary of earlier conversation]\n{self.summary}"
-            })
-
-            msgs.append({
-                "role": "assistant",
-                "content": "Understood. Continuing from that context."
             })
 
         msgs.extend(
@@ -80,7 +77,7 @@ class ConversationSummaryBufferMemory:
 
         new_summary = self._call_gemini(to_compress)
         self.summary = (
-            f"{self.summary}\n\n{new_summary}" if self.self.summary else new_summary
+            f"{self.summary}\n\n{new_summary}" if self.summary else new_summary
         )
 
     

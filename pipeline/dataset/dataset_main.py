@@ -52,7 +52,7 @@ def save_checkpoint(path: Path, completed: set[str], used_indices: set) -> None:
     with open(tmp, "w") as f:
         json.dump({
             'completed': sorted(completed),
-            'used_opl_indicies': sorted(used_indices)}, 
+            'used_opl_indices': sorted(used_indices)},
             f)
 
     tmp.replace(path)

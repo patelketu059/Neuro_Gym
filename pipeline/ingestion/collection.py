@@ -18,16 +18,14 @@ def get_client(
         port: int = 6333,
         timeout: int = 300
 ) -> QdrantClient:
-    
+    client = QdrantClient(host=host, port=port, timeout=timeout)
     try:
-        ping_client = QdrantClient(host=host, port=port, timeout=5)
-        ping_client.get_collections()
+        client.get_collections()
     except Exception as exc:
         raise ConnectionError(
             f"Cannot connect to Qdrant at {host}:{port}. "
         ) from exc
-
-    return QdrantClient(host=host, port=port, timeout=timeout)
+    return client
 
 def create_collections(
         client: QdrantClient,
