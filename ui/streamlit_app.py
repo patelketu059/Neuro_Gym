@@ -264,53 +264,58 @@ def _render_assistant_payload(msg: dict) -> None:
     )
 
 
-def _call_chat_api(prompt: str, uploaded_image) -> dict:
-    """POST to /chat. Returns a normalized result dict so the caller doesn't
-    branch on success/failure."""
-    fail_payload = {
-        "answer": "",
-        "sources": [],
-        "pdf_paths": [],
-        "athlete_ids": [],
-        "retrieval_ms": 0,
-        "generation_ms": 0,
-        "config_used": st.session_state.config_name,
+def _stream_chat_api(prompt: str, uploaded_image, metadata_sink: list):
+    """Generator for st.write_stream() — yields text tokens from /chat/stream.
+
+    The final SSE event (``__done__``) is captured into *metadata_sink* (a
+    one-element list) so the caller can read sources / timing after streaming.
+    """
+    import json as _json
+
+    data = {
+        "query":       prompt,
+        "session_id":  st.session_state.session_id,
+        "config_name": st.session_state.config_name,
     }
+    files = {}
+    if uploaded_image:
+        files["image"] = (
+            uploaded_image.name,
+            uploaded_image.getvalue(),
+            uploaded_image.type,
+        )
     try:
-        files = {}
-        data  = {
-            "query":       prompt,
-            "session_id":  st.session_state.session_id,
-            "config_name": st.session_state.config_name,
-        }
-        if uploaded_image:
-            files["image"] = (
-                uploaded_image.name,
-                uploaded_image.getvalue(),
-                uploaded_image.type,
-            )
-        resp = requests.post(
-            f"{FASTAPI_URL}/chat",
+        with requests.post(
+            f"{FASTAPI_URL}/chat/stream",
             data    = data,
             files   = files or None,
-            timeout = 120,
-        )
-        if resp.status_code == 200:
-            r = resp.json()
-            return {
-                "answer":        r["response"],
-                "sources":       r.get("sources", []),
-                "pdf_paths":     r.get("pdf_paths", []),
-                "athlete_ids":   r.get("athlete_ids", []),
-                "retrieval_ms":  r.get("retrieval_ms", 0),
-                "generation_ms": r.get("generation_ms", 0),
-                "config_used":   r.get("config_name", st.session_state.config_name),
-            }
-        return {**fail_payload, "answer": f"Error {resp.status_code}: {resp.text}"}
+            stream  = True,
+            timeout = 180,
+        ) as resp:
+            resp.raise_for_status()
+            for raw_line in resp.iter_lines(decode_unicode=True):
+                if not raw_line or not raw_line.startswith("data: "):
+                    continue
+                payload = raw_line[6:]   # strip "data: "
+                try:
+                    parsed = _json.loads(payload)
+                except _json.JSONDecodeError:
+                    yield payload
+                    continue
+
+                if isinstance(parsed, dict) and parsed.get("__done__"):
+                    metadata_sink.append(parsed)
+                    return
+                if isinstance(parsed, dict) and parsed.get("__error__"):
+                    yield f"\n\n⚠️ {parsed['__error__']}"
+                    return
+                if isinstance(parsed, str):
+                    yield parsed
+
     except requests.exceptions.Timeout:
-        return {**fail_payload, "answer": "Request timed out. Try a simpler query or check the API."}
-    except Exception as e:  # noqa: BLE001
-        return {**fail_payload, "answer": f"Error connecting to API: {e}"}
+        yield "\n\n⚠️ Request timed out. Try a simpler query or check the API."
+    except Exception as e:
+        yield f"\n\n⚠️ Error connecting to API: {e}"
 
 
 # -----------------------------------------------------------------------
@@ -423,23 +428,23 @@ with chat_col:
                 st.markdown(prompt)
 
             with st.chat_message("assistant"):
-                placeholder = st.empty()
-                with st.spinner("Retrieving and generating..."):
-                    result = _call_chat_api(
-                        prompt, st.session_state.get("uploaded_image")
+                metadata_sink: list = []
+                full_text = st.write_stream(
+                    _stream_chat_api(
+                        prompt,
+                        st.session_state.get("uploaded_image"),
+                        metadata_sink,
                     )
-
-                placeholder.markdown(result["answer"])
-                # Build the assistant message dict and render its payload
-                # so the user sees sources / profiles / latency before rerun.
+                )
+                meta = metadata_sink[0] if metadata_sink else {}
                 assistant_msg = {
                     "role":          "assistant",
-                    "content":       result["answer"],
-                    "sources":       result["sources"],
-                    "athlete_ids":   result["athlete_ids"],
-                    "retrieval_ms":  result["retrieval_ms"],
-                    "generation_ms": result["generation_ms"],
-                    "config_name":   result["config_used"],
+                    "content":       full_text or "",
+                    "sources":       meta.get("sources", []),
+                    "athlete_ids":   meta.get("athlete_ids", []),
+                    "retrieval_ms":  meta.get("retrieval_ms", 0),
+                    "generation_ms": meta.get("generation_ms", 0),
+                    "config_name":   meta.get("config_name", st.session_state.config_name),
                 }
                 _render_assistant_payload(assistant_msg)
 

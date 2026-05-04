@@ -2,9 +2,9 @@ from __future__ import annotations
 import logging
 import re
 import json
-from concurrent.futures import ThreadPoolExecutor
 
 from config.model_settings import GEMINI_AUX_MODEL
+from config.rag_config import HYDE_INTENTS
 
 ATHLETE_ID_RE = re.compile(r'athlete_\d{5}')
 INTENT_LABELS = ("factual", "trend", "comparison", "coaching", "visual")
@@ -226,24 +226,20 @@ def augment(inputs: dict) -> dict:
     register.update_from_text(raw_query)
     pronoun_resolved = register.resolve_pronouns(raw_query)
 
-    combined_result: dict = {}
-    hyde_document: str | None = None
-
     def _run_combined():
         return _call_combined(pronoun_resolved, history, gemini)
-    
+
     def _run_hyde():
         return _generate_hyde_document(pronoun_resolved, gemini)
-    
-    if use_hyde:
-        with ThreadPoolExecutor(max_workers = 2) as pool:
-            f_combined = pool.submit(_run_combined)
-            f_hyde = pool.submit(_run_hyde)
-            combined_result = f_combined.result()
-            hyde_document = f_hyde.result()
 
-    else:
-        combined_result = _run_combined()
+    # Always run combined analysis first (fast, temp=0.0)
+    combined_result = _run_combined()
+    intent_early = combined_result.get('intent', 'factual')
+
+    # Only run HyDE for intents that benefit from it
+    hyde_document: str | None = None
+    if use_hyde and intent_early in HYDE_INTENTS and gemini:
+        hyde_document = _run_hyde()
 
     intent = combined_result['intent']
     rewritten_query = combined_result['rewritten_query']
