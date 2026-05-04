@@ -1,5 +1,6 @@
 from __future__ import annotations
 import os
+import functools
 from pathlib import Path
 
 
@@ -196,6 +197,11 @@ def embed_query_api(
     raise last_exc  # type: ignore[misc]
 
 
+@functools.lru_cache(maxsize=512)
+def _cached_text_embed(text: str, mode: str, api_key: str) -> tuple:
+    return tuple(embed_query_api(text, image_path=None, api_key=api_key, mode=mode))
+
+
 def embed_query(
     text: str,
     image_path: str | None = None,
@@ -203,9 +209,7 @@ def embed_query(
     mode: str = 'query'
 ) -> list[float]:
 
-    return embed_query_api(
-        text,
-        image_path = image_path,
-        api_key = api_key,
-        mode = mode,
-    )
+    if image_path is None:
+        api_key_resolved = api_key or os.environ.get("OPENROUTER_API_KEY", "")
+        return list(_cached_text_embed(text, mode, api_key_resolved))
+    return embed_query_api(text, image_path=image_path, api_key=api_key, mode=mode)

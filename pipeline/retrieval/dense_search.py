@@ -11,14 +11,19 @@ _VALID_LEVELS = {'elite', 'advanced', 'intermediate', 'novice'}
 def _build_qdrant_filter(filters: dict | None) -> Filter | None:
     if not filters:
         return None
+    conditions = []
+
     levels = [lvl for lvl in filters.get('training_levels', []) if lvl in _VALID_LEVELS]
-    if not levels:
-        return None
     if len(levels) == 1:
-        condition = FieldCondition(key='training_level', match=MatchValue(value=levels[0]))
-    else:
-        condition = FieldCondition(key='training_level', match=MatchAny(any=levels))
-    return Filter(must=[condition])
+        conditions.append(FieldCondition(key='training_level', match=MatchValue(value=levels[0])))
+    elif len(levels) > 1:
+        conditions.append(FieldCondition(key='training_level', match=MatchAny(any=levels)))
+
+    athlete_ids = filters.get('athlete_ids', [])
+    if athlete_ids:
+        conditions.append(FieldCondition(key='athlete_id', match=MatchAny(any=list(athlete_ids))))
+
+    return Filter(must=conditions) if conditions else None
 
 
 def dense_search(

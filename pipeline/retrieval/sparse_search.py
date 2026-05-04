@@ -1,5 +1,6 @@
 from __future__ import annotations
 from pipeline.ingestion.bm_index import bm25_search
+from config.rag_config import BM25_OVERSAMPLE_ATHLETE, BM25_OVERSAMPLE_LEVEL
 
 _VALID_LEVELS = {'elite', 'advanced', 'intermediate', 'novice'}
 
@@ -18,13 +19,28 @@ def sparse_search(
             if lvl in _VALID_LEVELS:
                 level_set.add(lvl)
 
-    # Fetch more candidates so post-filtering still yields top_k hits
-    fetch_k = top_k * 4 if level_set else top_k
+    athlete_ids = set(filters.get('athlete_ids', [])) if filters else set()
+    has_id_filter = bool(athlete_ids)
+    has_level_filter = bool(level_set)
+
+    if has_id_filter:
+        fetch_k = top_k * BM25_OVERSAMPLE_ATHLETE
+    elif has_level_filter:
+        fetch_k = top_k * BM25_OVERSAMPLE_LEVEL
+    else:
+        fetch_k = top_k
+
     raw = bm25_search(query, bm25, corpus, top_k=fetch_k)
 
-    if level_set:
-        raw = [r for r in raw if str(r.get('training_level', '')).lower() in level_set]
-        raw = raw[:top_k]
+    if has_level_filter or has_id_filter:
+        filtered: list[dict] = []
+        for r in raw:
+            if has_level_filter and str(r.get('training_level', '')).lower() not in level_set:
+                continue
+            if has_id_filter and r.get('athlete_id') not in athlete_ids:
+                continue
+            filtered.append(r)
+        raw = filtered[:top_k]
 
     return [
         {

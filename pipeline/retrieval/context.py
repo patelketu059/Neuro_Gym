@@ -20,7 +20,7 @@ def deduplicate_athlete(
     return [seen[aid] for aid in ordered[:top_k]]
 
 
-_CHARS_TO_TOKEN = 4
+_CHARS_TO_TOKEN = 3
 _MAX_TEXT_TOKENS = 4096
 
 
