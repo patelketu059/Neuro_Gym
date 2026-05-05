@@ -1,5 +1,6 @@
 from __future__ import annotations
 import os
+import functools
 from pathlib import Path
 
 
@@ -129,16 +130,15 @@ def embed_query_api(
         api_key: str | None = None,
         mode: str = 'query'
 ) -> list[float]:
-    
+
+    import time
     import requests
     import base64
 
     api_key = api_key or os.environ.get("OPENROUTER_API_KEY")
-    if not api_key: 
-        raise EnvironmentError(
-            "OPENROUTER_API_KEY not set"
-        )
-    
+    if not api_key:
+        raise EnvironmentError("OPENROUTER_API_KEY not set")
+
     if image_path is None:
         payload = {
             "model": "nvidia/llama-nemotron-embed-vl-1b-v2:free",
@@ -146,41 +146,60 @@ def embed_query_api(
             "encoding_format": "float"
         }
     else:
-        image_data   = Path(image_path).read_bytes()
-        b64          = base64.b64encode(image_data).decode("utf-8")
-        ext          = Path(image_path).suffix.lower().lstrip(".")
-        mime_map     = {"jpg": "jpeg", "jpeg": "jpeg", "png": "png",
-                        "gif": "gif",  "webp": "webp"}
-        mime         = f"image/{mime_map.get(ext, 'jpeg')}"
-        data_url     = f"data:{mime};base64,{b64}"
+        image_data = Path(image_path).read_bytes()
+        b64        = base64.b64encode(image_data).decode("utf-8")
+        ext        = Path(image_path).suffix.lower().lstrip(".")
+        mime_map   = {"jpg": "jpeg", "jpeg": "jpeg", "png": "png",
+                      "gif": "gif",  "webp": "webp"}
+        mime       = f"image/{mime_map.get(ext, 'jpeg')}"
+        data_url   = f"data:{mime};base64,{b64}"
 
         payload = {
-            "model":            "nvidia/llama-nemotron-embed-vl-1b-v2:free",
-            "encoding_format":  "float",
+            "model":           "nvidia/llama-nemotron-embed-vl-1b-v2:free",
+            "encoding_format": "float",
             "input": [
                 {
                     "content": [
-                        {"type": "text",
-                         "text": f"{mode}: {text}"},
-                        {"type": "image_url",
-                         "image_url": {"url": data_url}},
+                        {"type": "text",      "text": f"{mode}: {text}"},
+                        {"type": "image_url", "image_url": {"url": data_url}},
                     ]
                 }
             ],
         }
 
-    resp = requests.post(
-        "https://openrouter.ai/api/v1/embeddings",
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        json = payload,
-        timeout = 30,
-    )
+    _retry_delays = [1.0, 2.0]
+    last_exc: Exception | None = None
+    for attempt, delay in enumerate([0.0] + _retry_delays):
+        if delay:
+            time.sleep(delay)
+        try:
+            resp = requests.post(
+                "https://openrouter.ai/api/v1/embeddings",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=30,
+            )
+            resp.raise_for_status()
+            try:
+                return resp.json()["data"][0]["embedding"]
+            except (KeyError, IndexError) as e:
+                raise ValueError(
+                    f"Unexpected OpenRouter response format: {e} — body: {resp.text[:200]}"
+                ) from e
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code in (429, 503):
+                last_exc = e
+                continue
+            raise
+    raise last_exc  # type: ignore[misc]
 
-    resp.raise_for_status()
-    return resp.json()["data"][0]["embedding"]
+
+@functools.lru_cache(maxsize=512)
+def _cached_text_embed(text: str, mode: str, api_key: str) -> tuple:
+    return tuple(embed_query_api(text, image_path=None, api_key=api_key, mode=mode))
 
 
 def embed_query(
@@ -190,9 +209,7 @@ def embed_query(
     mode: str = 'query'
 ) -> list[float]:
 
-    return embed_query_api(
-        text,
-        image_path = image_path,
-        api_key = api_key,
-        mode = mode,
-    )
+    if image_path is None:
+        api_key_resolved = api_key or os.environ.get("OPENROUTER_API_KEY", "")
+        return list(_cached_text_embed(text, mode, api_key_resolved))
+    return embed_query_api(text, image_path=image_path, api_key=api_key, mode=mode)
