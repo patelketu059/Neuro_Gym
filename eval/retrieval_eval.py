@@ -135,6 +135,43 @@ GOLDEN_QUESTIONS: list[dict[str, Any]] = [
         "intent": "visual",
         "difficulty": "medium",
     },
+    # Cross-athlete comparison questions
+    {
+        "id": "Q13",
+        "query": "Compare athlete_00042 and athlete_00117's peak squat numbers — who lifted more?",
+        "gt_athlete_ids": ["athlete_00042", "athlete_00117"],
+        "intent": "comparison",
+        "difficulty": "medium",
+    },
+    {
+        "id": "Q14",
+        "query": "How do athlete_00089 and athlete_00033's Dots scores and training levels compare?",
+        "gt_athlete_ids": ["athlete_00089", "athlete_00033"],
+        "intent": "comparison",
+        "difficulty": "medium",
+    },
+    {
+        "id": "Q15",
+        "query": "Did athlete_00250 or athlete_00301 use higher RPE values during the intensification phase?",
+        "gt_athlete_ids": ["athlete_00250", "athlete_00301"],
+        "intent": "comparison",
+        "difficulty": "hard",
+    },
+    # Cross-level comparison questions
+    {
+        "id": "Q16",
+        "query": "Do elite athletes generally use higher RPE values than novice athletes throughout the block?",
+        "gt_athlete_ids": [],
+        "intent": "comparison",
+        "difficulty": "hard",
+    },
+    {
+        "id": "Q17",
+        "query": "How does the squat peak kg differ between advanced and intermediate athletes?",
+        "gt_athlete_ids": [],
+        "intent": "comparison",
+        "difficulty": "hard",
+    },
 ]
 
 

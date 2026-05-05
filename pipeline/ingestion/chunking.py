@@ -197,12 +197,7 @@ def optimized_session_to_nl(
 
     for lift in lift_order:
         r = lift_lookup.get(lift)
-        # Get lift row
-        # row = wk_rows[wk_rows['main_lift'] == lift]
-        # Check for empty row
         if not r: continue
-        # get first row, extract kg, rpe, delta, pct
-        # r = row.iloc[0]
         kg = r['main_lift_kg']
         rpe = r['main_lift_rpe']
         delta = r.get('main_lift_delta_kg', None)
@@ -219,15 +214,11 @@ def optimized_session_to_nl(
         lines.append(
             f"{lift}: {kg:.1f}kg{delta_str}  |  RPE {rpe:.1f}{pct_str}"
         )
-    # print(lines)
-    # print(wk_rows['day_label'])
+
     day_order = ['Lower A', 'Upper A', 'Lower B', 'Upper B']
     for day_label in day_order:
-        # get label row
-        row = wk_rows[wk_rows['day_label'] == day_label]
-        if row.empty: continue
-        r = row.iloc[0]
-
+        r = day_lookup.get(day_label)
+        if not r: continue
 
         names = str(r["accessories"]).split("|")
         sets_ = str(r.get("accessory_sets", "")).split("|")
@@ -267,23 +258,49 @@ def optimized_session_to_nl(
 def build_all_nl_strings(
         session_df: pd.DataFrame,
 ) -> list[dict]:
-    
+
     records: list[dict] = []
 
     for athlete_id in tqdm(session_df['athlete_id'].unique()):
-    
+
         athlete = session_df[session_df['athlete_id'] == athlete_id]
+        first_row = athlete.iloc[0]
 
         meta = {
             'athlete_id': athlete_id,
-            'training_level': session_df['training_level'].iloc[0],
-            'dots': float(session_df['dots'].iloc[0]),
-            'opl_row_index': int(athlete['opl_row_index'].iloc[0]) 
+            'training_level': str(first_row['training_level']),
+            'dots': float(first_row['dots']),
+            'opl_row_index': int(first_row['opl_row_index'])
                         if 'opl_row_index' in athlete.columns else -1,
-            'primary_program': str(athlete['primary_program'].iloc[0])
+            'primary_program': str(first_row['primary_program'])
                         if 'primary_program' in athlete.columns else ""
         }
-        # print(len(sorted(athlete['week'].unique())))
+
+        # Add per-athlete coaching summary as a searchable BM25 record (week=0)
+        squat_rows  = athlete[athlete['main_lift'] == 'Squat'].sort_values('week')
+        week1_squat = float(squat_rows.iloc[0]['main_lift_kg']) if not squat_rows.empty else 0.0
+        peak_squat  = float(squat_rows['main_lift_kg'].max())   if not squat_rows.empty else 0.0
+        rpe_min     = float(athlete['main_lift_rpe'].min())
+        rpe_max     = float(athlete['main_lift_rpe'].max())
+
+        coaching_text = (
+            f"Athlete {athlete_id} · {str(first_row.get('training_level', '')).capitalize()} powerlifter · "
+            f"{str(first_row.get('sex', ''))} · {float(first_row.get('bodyweight_kg', 0)):.1f}kg bodyweight · "
+            f"Dots {float(first_row.get('dots', 0)):.1f}\n"
+            f"Competition lifts: Squat {float(first_row.get('squat_peak_kg', 0)):.1f}kg  "
+            f"Bench {float(first_row.get('bench_peak_kg', 0)):.1f}kg  "
+            f"Deadlift {float(first_row.get('deadlift_peak_kg', 0)):.1f}kg\n"
+            f"12-week block: opens at {week1_squat:.1f}kg squat, peaks at {peak_squat:.1f}kg.\n"
+            f"RPE progression: {rpe_min:.1f} → {rpe_max:.1f} across the block.\n"
+            f"Primary program: {str(first_row.get('primary_program', ''))}."
+        )
+        records.append({
+            **meta,
+            'week': 0,
+            'block_phase': 'summary',
+            'text': coaching_text
+        })
+
         for week in sorted(athlete['week'].unique()):
             phase = str(athlete[athlete['week'] == week]['block_phase'].iloc[0])
             text = session_to_nl(session_df, athlete_id, int(week))

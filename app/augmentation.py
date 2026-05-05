@@ -1,7 +1,10 @@
 from __future__ import annotations
+import logging
 import re
 import json
-from concurrent.futures import ThreadPoolExecutor
+
+from config.model_settings import GEMINI_AUX_MODEL
+from config.rag_config import HYDE_INTENTS
 
 ATHLETE_ID_RE = re.compile(r'athlete_\d{5}')
 INTENT_LABELS = ("factual", "trend", "comparison", "coaching", "visual")
@@ -45,22 +48,25 @@ class EntityRegister:
 
 
 
+_LEVEL_VALUES = ('elite', 'advanced', 'intermediate', 'novice')
+
 _COMBINED_PROMPT = """
 You are a query optimizer for a powerlifting training database.
 The database contains athlete session logs, coaching text, and PDF training reports.
 
-Analyze the question and return ONLY a JSON object - no markdown, no explanation: 
+Analyze the question and return ONLY a JSON object - no markdown, no explanation:
 {{
-    "intent": "<factual|trend|comparison|coaching|visual>".
+    "intent": "<factual|trend|comparison|coaching|visual>",
     "rewritten_query": "<self-contained retrieval query, max 25 words>",
     "athlete_ids": ["<athlete_id>", ...],
-    "sub_queries": ["<query1>", "<query2>"]
+    "sub_queries": ["<query1>", "<query2>"],
+    "training_levels": ["<elite|advanced|intermediate|novice>", ...]
 }}
 
 Intent Rules:
 - factual       : specific data point for one athlete (week N lift, RPE, program name, Dots)
 - trend         : progression pattern across multiple weeks for one athlete
-- comparison    : explicitly comparing two or more athletes
+- comparison    : explicitly comparing two or more athletes OR two or more training levels
 - coaching      : open-ended advice, recommendation, or coaching question
 - visual        : asks about a chart, heatmap, radar, or PDF page
 
@@ -72,13 +78,21 @@ rewritten_query rules:
 
 athlete_ids rules:
 -   List ALL athlete IDs relevant to this question (from query text + HISTORY)
--   Empty list [] for no specific athletes
+-   Empty list [] for no specific athletes (e.g. general questions about a level group)
 
-sub_queries rules (ONLY populare if intent == "comparison"):
--   One focused query per athlete being compared
--   Each query must be self-contained with the athlete ID and the comparison topic
--   Example: ["athlete_00088 deadlift peak progression", "athlete_03985 deadlift peak progression"]
+sub_queries rules (ONLY populate if intent == "comparison"):
+-   For athlete comparisons: one self-contained query per athlete, e.g.
+    ["athlete_00088 deadlift peak progression", "athlete_03985 deadlift peak progression"]
+-   For level-group comparisons: one self-contained query per level mentioning the topic, e.g.
+    ["advanced athletes RPE progression across block", "novice athletes RPE progression across block"]
 -   Empty list [] for all other intents
+
+training_levels rules:
+-   List every training level explicitly mentioned in the query
+-   Use ONLY these values: "elite", "advanced", "intermediate", "novice"
+-   Single level query ("elite athletes only")   → ["elite"]
+-   Cross-level comparison ("advanced vs novice") → ["advanced", "novice"]
+-   No level mentioned, or question about a named athlete → [] (empty list)
 
 CONVERSATION HISTORY:
 {history}
@@ -90,8 +104,7 @@ QUESTION: {query}
 def _call_combined(query: str, history: list[dict], gemini) -> dict:
 
     summary_block = [m for m in history if m['content'].startswith("[Summary")]
-    live_turns    = [m for m in history if not m["content"].startswith("[Summary")
-                     and m.get("content") != "Understood. Continuing from that context."]
+    live_turns    = [m for m in history if not m["content"].startswith("[Summary")]
     
     context_msgs = summary_block + live_turns[-3:]
 
@@ -103,7 +116,7 @@ def _call_combined(query: str, history: list[dict], gemini) -> dict:
     try:
         from google.genai import types
         response = gemini.models.generate_content(
-            model    = "gemini-2.0-flash",
+            model    = GEMINI_AUX_MODEL,
             contents = prompt,
             config   = types.GenerateContentConfig(
                 temperature       = 0.0,
@@ -126,25 +139,33 @@ def _call_combined(query: str, history: list[dict], gemini) -> dict:
         rewritten = re.sub(r'^["\']|["\']$', "", rewritten).strip() or query
 
         athlete_ids = [
-            aid for aid in data.get('athlete_ids', []) 
+            aid for aid in data.get('athlete_ids', [])
             if ATHLETE_ID_RE.fullmatch(aid)
         ]
 
         sub_queries = data.get('sub_queries', []) if intent == 'comparison' else []
 
+        training_levels = [
+            lvl for lvl in data.get('training_levels', [])
+            if lvl in _LEVEL_VALUES
+        ]
+
         return {
             'intent': intent,
             'rewritten_query': rewritten,
             'athlete_ids': athlete_ids,
-            'sub_queries': sub_queries
+            'sub_queries': sub_queries,
+            'training_levels': training_levels,
         }
-    
-    except Exception:
+
+    except Exception as e:
+        logging.warning("[augmentation] LLM query-analysis call failed: %s", e)
         return {
             'intent': 'factual',
             'rewritten_query': query,
             'athlete_ids': [],
-            'sub_queries': []
+            'sub_queries': [],
+            'training_levels': [],
         }
 
 
@@ -174,7 +195,8 @@ def _generate_hyde_document(query: str, gemini) -> str | None:
         )
         text = response.text.strip()
         return text if text else None
-    except Exception:
+    except Exception as e:
+        logging.warning("[augmentation] HyDE generation failed: %s", e)
         return None
     
 
@@ -188,14 +210,15 @@ def augment(inputs: dict) -> dict:
 
     if not history or not gemini:
         return {
-            **inputs, 
+            **inputs,
             'retrieval_query': raw_query,
             'hyde_vector': [],
             'sub_queries': [],
             'intent': "factual",
             'query_rewritten': False,
-            'original_query': raw_query
-            }
+            'original_query': raw_query,
+            'training_levels': [],
+        }
     
 
     register = EntityRegister()
@@ -203,24 +226,20 @@ def augment(inputs: dict) -> dict:
     register.update_from_text(raw_query)
     pronoun_resolved = register.resolve_pronouns(raw_query)
 
-    combined_result: dict = {}
-    hyde_document: str | None = None
-
     def _run_combined():
         return _call_combined(pronoun_resolved, history, gemini)
-    
+
     def _run_hyde():
         return _generate_hyde_document(pronoun_resolved, gemini)
-    
-    if use_hyde:
-        with ThreadPoolExecutor(max_workers = 2) as pool:
-            f_combined = pool.submit(_run_combined)
-            f_hyde = pool.submit(_run_hyde)
-            combined_result = f_combined.result()
-            hyde_document = f_hyde.result()
 
-    else:
-        combined_result = _run_combined()
+    # Always run combined analysis first (fast, temp=0.0)
+    combined_result = _run_combined()
+    intent_early = combined_result.get('intent', 'factual')
+
+    # Only run HyDE for intents that benefit from it
+    hyde_document: str | None = None
+    if use_hyde and intent_early in HYDE_INTENTS and gemini:
+        hyde_document = _run_hyde()
 
     intent = combined_result['intent']
     rewritten_query = combined_result['rewritten_query']
@@ -254,4 +273,5 @@ def augment(inputs: dict) -> dict:
         "sub_queries":      sub_queries,
         "hyde_document":    hyde_document or "",
         "hyde_vector":      hyde_vector,
+        "training_levels":  combined_result.get('training_levels', []),
     }

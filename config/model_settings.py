@@ -1,14 +1,28 @@
 from pathlib import Path
 import os
-import torch
 
 EMBEDDING_MODEL_ID = "nvidia/llama-nemotron-embed-vl-1b-v2"
-DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+# Gemini model identifiers — centralised so chain.py, augmentation.py and
+# memory.py stay in sync without scattered string literals.
+GEMINI_GENERATION_MODEL = "gemini-2.5-flash"
+GEMINI_AUX_MODEL        = "gemini-2.0-flash"
+
+
+def _get_device() -> str:
+    try:
+        import torch
+        return 'cuda' if torch.cuda.is_available() else 'cpu'
+    except ImportError:
+        return 'cpu'
+
+
+DEVICE = _get_device()
 
 
 ALL_COLLECTIONS = ["gym_images", "gym_text", "gym_tables"]
 
-RETRUEVAL_CONFIGS: dict[str, dict] = {
+RETRIEVAL_CONFIGS: dict[str, dict] = {
     "dense_images_only": {
         "label":       "Dense — images only",
         "collections": ["gym_images"],

@@ -26,9 +26,7 @@ def _load_repo_ids() -> tuple[str, str]:
 
 def _get_token() -> str | None:
     load_dotenv()
-    token = os.getenv('HF_TOKEN')
-    print(token)
-    return token
+    return os.getenv('HF_TOKEN')
 
 
 def _hf_download(

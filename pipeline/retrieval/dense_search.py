@@ -1,9 +1,29 @@
 from __future__ import annotations
 from qdrant_client import QdrantClient
-# from qdrant_client.models import Filter, FieldCondition, MatchValue
+from qdrant_client.models import Filter, FieldCondition, MatchValue, MatchAny
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 COLLECTIONS = ['gym_images', 'gym_text', 'gym_tables']
+
+_VALID_LEVELS = {'elite', 'advanced', 'intermediate', 'novice'}
+
+
+def _build_qdrant_filter(filters: dict | None) -> Filter | None:
+    if not filters:
+        return None
+    conditions = []
+
+    levels = [lvl for lvl in filters.get('training_levels', []) if lvl in _VALID_LEVELS]
+    if len(levels) == 1:
+        conditions.append(FieldCondition(key='training_level', match=MatchValue(value=levels[0])))
+    elif len(levels) > 1:
+        conditions.append(FieldCondition(key='training_level', match=MatchAny(any=levels)))
+
+    athlete_ids = filters.get('athlete_ids', [])
+    if athlete_ids:
+        conditions.append(FieldCondition(key='athlete_id', match=MatchAny(any=list(athlete_ids))))
+
+    return Filter(must=conditions) if conditions else None
 
 
 def dense_search(
@@ -14,14 +34,13 @@ def dense_search(
         filters: dict | None = None
 ) -> list[dict]:
 
-    # qdrant-client 1.10+ removed .search(); .query_points() is the
-    # replacement universal endpoint. It returns a QueryResponse whose
-    # .points field is the list of ScoredPoint (id, score, payload).
+    qdrant_filter = _build_qdrant_filter(filters)
+
     response = client.query_points(
         collection_name = collection,
         query           = query_vector,
         limit           = top_k,
-        query_filter    = filters,
+        query_filter    = qdrant_filter,
         with_payload    = True,
     )
 

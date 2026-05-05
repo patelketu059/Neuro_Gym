@@ -1,8 +1,13 @@
 from __future__ import annotations
-import time 
+import time
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from config.rag_config import (
+    INTENT_CONTEXT_TOKENS, DEFAULT_CONTEXT_TOKENS,
+    TOP_K_HYBRID, TOP_K_RERANK, TOP_K_ATHLETES,
+    TEXT_ONLY_INTENTS,
+)
 
 TEXT_COLLECTIONS  = ["gym_text", "gym_tables"]
 IMAGE_COLLECTIONS = ["gym_images"]
@@ -79,6 +84,9 @@ def multi_retrieve(
     return results_list
 
 
+# Intent budgets and routing sourced from config.rag_config for single-location tuning.
+
+
 def retrieve(
         query: str,
         bm25,
@@ -92,9 +100,10 @@ def retrieve(
         top_k_hybrid: int                           = 50,
         top_k_rerank: int                           = 20,
         top_k_athletes: int                         = 5,
-        max_context_tokens: int                     = 4096,
+        max_context_tokens: int                     = 0,
         openrouter_api_key: str | None              = None,
-        filters: dict | None                        = None
+        filters: dict | None                        = None,
+        intent: str                                 = 'factual',
 ) -> dict:
     
     from pipeline.ingestion.embedder import embed_query
@@ -108,11 +117,19 @@ def retrieve(
     cfg = config or CONFIGS[DEFAULT_CONFIG]
     t0 = time.perf_counter()
 
+    if max_context_tokens <= 0:
+        max_context_tokens = INTENT_CONTEXT_TOKENS.get(intent, DEFAULT_CONTEXT_TOKENS)
+
     text_collections = [c for c in cfg.collections if c != "gym_images"]
     image_collections_in_cfg = [c for c in cfg.collections if c == "gym_images"]
 
+    effective_text_collections  = text_collections
+    effective_image_collections = image_collections_in_cfg
+    if intent in TEXT_ONLY_INTENTS:
+        effective_image_collections = []
+
     text_vector: list[float] = []
-    if text_collections or (image_collections_in_cfg and not query_image_path):
+    if effective_text_collections or (effective_image_collections and not query_image_path):
         if cfg.collections:
             text_vector = embed_query(
                 query,
@@ -120,7 +137,7 @@ def retrieve(
             )
 
     image_vector: list[float] = []
-    if query_image_path and image_collections_in_cfg:
+    if query_image_path and effective_image_collections:
         try:
             image_vector = embed_query(
                 query,
@@ -138,17 +155,17 @@ def retrieve(
     search_vector = hyde_vector if hyde_vector else text_vector
     dense_results: list[list[dict]] = []
 
-    if text_collections and search_vector:
+    if effective_text_collections and search_vector:
         text_results = dense_search_all(
             query_vector = search_vector,
             client = client,
-            collections = text_collections,
+            collections = effective_text_collections,
             top_k = top_k_hybrid,
             filters = filters,
         )
         dense_results.extend(text_results)
 
-    if image_collections_in_cfg:
+    if effective_image_collections:
         vec_image = image_vector if image_vector else text_vector
         if vec_image:
             img_results = dense_search(
@@ -168,8 +185,9 @@ def retrieve(
         
     bm25_results: list[dict] = []
     if cfg.use_bm25:
-        bm25_results = sparse_search(query, bm25, corpus, 
-                                     top_k = top_k_hybrid)
+        bm25_results = sparse_search(query, bm25, corpus,
+                                     top_k = top_k_hybrid,
+                                     filters = filters)
         
     all_lists = dense_results + ([bm25_results])
     fused = RRF(all_lists)[:top_k_hybrid]

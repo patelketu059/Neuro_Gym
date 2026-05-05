@@ -1,0 +1,60 @@
+# Retrieval regression CI
+#
+# NOTE: This workflow requires Qdrant to be pre-seeded with the gym corpus.
+# In CI the Qdrant service starts empty; the eval will pass trivially until
+# a data-seeding step (e.g. a fixture restore or a minimal ingest script) is
+# added. Add that step before "Run retrieval eval" once a CI-safe seed
+# artifact exists.
+name: Retrieval regression
+
+on:
+  pull_request:
+    paths:
+      - 'pipeline/retrieval/**'
+      - 'pipeline/ingestion/chunking.py'
+      - 'app/augmentation.py'
+      - 'app/chain.py'
+      - 'eval/**'
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    env:
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      QDRANT_HOST: localhost
+      QDRANT_PORT: 6333
+
+    services:
+      qdrant:
+        image: qdrant/qdrant:latest
+        ports:
+          - 6333:6333
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Download BM25 index (smoke test artifact)
+        run: echo "Skipping full download in CI — use pre-seeded fixture"
+      - name: Run retrieval eval (smoke, 5 questions, config F)
+        run: |
+          python eval/retrieval_eval.py --configs F --limit 5 --no-chart
+      - name: Assert Hit@5 >= 0.60
+        run: |
+          python - <<'EOF'
+          import json, sys
+          data = json.load(open("eval/results_summary.json"))
+          for cfg in data:
+              if not cfg["config"].startswith("F"):
+                  continue
+              h5 = cfg["hit_at_5"]
+              print(f"Config F Hit@5 = {h5:.3f}")
+              if h5 < 0.60:
+                  print("FAIL: Hit@5 below threshold 0.60")
+                  sys.exit(1)
+          print("PASS")
+          EOF
