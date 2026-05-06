@@ -273,7 +273,10 @@ def build_all_nl_strings(
             'opl_row_index': int(first_row['opl_row_index'])
                         if 'opl_row_index' in athlete.columns else -1,
             'primary_program': str(first_row['primary_program'])
-                        if 'primary_program' in athlete.columns else ""
+                        if 'primary_program' in athlete.columns else "",
+            'squat_peak_kg':    float(first_row.get('squat_peak_kg', 0) or 0),
+            'bench_peak_kg':    float(first_row.get('bench_peak_kg', 0) or 0),
+            'deadlift_peak_kg': float(first_row.get('deadlift_peak_kg', 0) or 0),
         }
 
         # Add per-athlete coaching summary as a searchable BM25 record (week=0)
@@ -326,10 +329,13 @@ def optimized_build_all_nl_strings(
             'athlete_id': athlete_id,
             'training_level': first_row['training_level'],
             'dots': float(first_row['dots']),
-            'opl_row_index': int(first_row['opl_row_index']) 
+            'opl_row_index': int(first_row['opl_row_index'])
                         if 'opl_row_index' in athlete_group.columns else -1,
             'primary_program': str(first_row['primary_program'])
-                        if 'primary_program' in athlete_group.columns else ""
+                        if 'primary_program' in athlete_group.columns else "",
+            'squat_peak_kg':    float(first_row.get('squat_peak_kg', 0) or 0),
+            'bench_peak_kg':    float(first_row.get('bench_peak_kg', 0) or 0),
+            'deadlift_peak_kg': float(first_row.get('deadlift_peak_kg', 0) or 0),
         }
 
         for week, week_group in athlete_group.groupby('week'):

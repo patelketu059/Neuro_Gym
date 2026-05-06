@@ -48,15 +48,18 @@ def sparse_search(
             "score": float(r.get('bm_score', 0)),
             "collection": "bm25",
             "payload": {
-                "athlete_id":      r["athlete_id"],
-                "week":            r.get("week"),
-                "block_phase":     r.get("block_phase", ""),
-                "text":            r.get("text", ""),
-                "pdf_path":        f"pdfs/{r['athlete_id']}.pdf",
-                "training_level":  r.get("training_level", ""),
-                "dots":            r.get("dots", 0),
-                "opl_row_index":   r.get("opl_row_index", -1),
-                "primary_program": r.get("primary_program", ""),
+                "athlete_id":       r["athlete_id"],
+                "week":             r.get("week"),
+                "block_phase":      r.get("block_phase", ""),
+                "text":             r.get("text", ""),
+                "pdf_path":         f"pdfs/{r['athlete_id']}.pdf",
+                "training_level":   r.get("training_level", ""),
+                "dots":             r.get("dots", 0),
+                "opl_row_index":    r.get("opl_row_index", -1),
+                "primary_program":  r.get("primary_program", ""),
+                "squat_peak_kg":    r.get("squat_peak_kg", 0),
+                "bench_peak_kg":    r.get("bench_peak_kg", 0),
+                "deadlift_peak_kg": r.get("deadlift_peak_kg", 0),
             }
         }
         for r in raw
