@@ -1040,8 +1040,10 @@ def main():
         "volume_pct", "main_lift_delta_kg", "opl_row_index",
     ]
     _SUMMARY_NUMERIC = [
-        "competition_1rm_kg", "bodyweight_kg", "training_1rm_kg",
-        "peak_week", "week",
+        "competition_1rm_kg", "training_1rm_kg", "dots",
+        "week_1_kg", "week_peak_kg", "week_floor_kg",
+        "peak_week", "floor_week", "total_gain_kg", "peak_pct_of_1rm",
+        "opl_row_index",
     ]
     for col in _SESSION_NUMERIC:
         if col in sessions.columns:
