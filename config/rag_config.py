@@ -21,9 +21,10 @@ INTENT_CONTEXT_TOKENS: dict[str, int] = {
 DEFAULT_CONTEXT_TOKENS: int = 8_192   # fallback for unrecognised intents
 
 # ── Retrieval candidate counts ────────────────────────────────────────────────
-TOP_K_HYBRID:   int = 50   # candidates from each dense/BM25 list before RRF
-TOP_K_RERANK:   int = 20   # kept after cross-encoder reranker
-TOP_K_ATHLETES: int = 5    # unique athletes after deduplication
+TOP_K_HYBRID:             int = 50  # candidates from each dense/BM25 list before RRF
+TOP_K_RERANK:             int = 20  # kept after cross-encoder reranker
+TOP_K_ATHLETES:           int = 5   # unique athletes after deduplication
+TOP_K_PER_ATHLETE_CHUNKS: int = 3   # max week-chunks kept per athlete (allows multi-week context)
 
 # ── Reciprocal Rank Fusion ────────────────────────────────────────────────────
 RRF_K: int = 60   # denominator — higher → less aggressive rank bias
