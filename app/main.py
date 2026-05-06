@@ -35,12 +35,20 @@ async def lifespan(app: FastAPI):
     print(f"[INFO-APP] - Qdrant Instantiated")
 
 
-    from pipeline.ingestion.bm_index import load_bm_index
+    from pipeline.ingestion.bm_index import load_bm_index, build_athlete_peaks, patch_corpus_with_peaks
+    _embed_dir = ROOT / 'hf_pull' / 'k2p' / 'gym-rag-embeddings'
     app.state.bm25, app.state.corpus = load_bm_index(
-        index_path = ROOT / 'hf_pull' / 'k2p' / 'gym-rag-embeddings' / 'BM_index.pkl',
-        corpus_path = ROOT / 'hf_pull'/ 'k2p' / 'gym-rag-embeddings' / 'BM_corpus.json'
+        index_path  = _embed_dir / 'BM_index.pkl',
+        corpus_path = _embed_dir / 'BM_corpus.json',
     )
     print(f"[INFO-APP] - BM25 Loaded | {len(app.state.corpus)}")
+
+    # Patch corpus with competition lift peaks parsed from gym_text coaching
+    # summaries — the BM_corpus.json was generated before squat/bench/deadlift
+    # peak fields were added to the dataset schema.
+    _peaks = build_athlete_peaks(_embed_dir / 'text_vectors')
+    _patched = patch_corpus_with_peaks(app.state.corpus, _peaks)
+    print(f"[INFO-APP] - Corpus patched with lift peaks | {len(_peaks)} athletes, {_patched} records updated")
 
 
     from google import genai

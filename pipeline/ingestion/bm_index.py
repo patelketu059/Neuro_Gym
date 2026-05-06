@@ -6,6 +6,70 @@ from pathlib import Path
 from rank_bm25 import BM25Okapi
 from config.settings import DATA_DIR, BM_INDEX_PATH, BM_CORPUS_PATH
 
+# Regex to extract competition lifts from gym_text coaching-summary passages.
+# Matches: "Competition lifts: Squat 162.5kg  Bench 97.5kg  Deadlift 190.0kg"
+_COMP_LIFT_RE = re.compile(
+    r'Competition lifts:\s*Squat\s*([\d.]+)kg\s+Bench\s*([\d.]+)kg\s+Deadlift\s*([\d.]+)kg',
+    re.IGNORECASE,
+)
+
+
+def build_athlete_peaks(gym_text_dir: Path) -> dict[str, dict]:
+    """Parse competition lift peaks from gym_text .npy coaching-summary payloads.
+
+    Iterates every *_text.npy file in *gym_text_dir*, locates the
+    "Competition lifts: Squat Xkg Bench Xkg Deadlift Xkg" line embedded in the
+    coaching-summary text, and returns a dict keyed by athlete_id.
+
+    This is the authoritative source of peak lift data because the coaching
+    summary text was generated from the real competition numbers even when those
+    numbers were not stored as separate payload fields.
+    """
+    import numpy as np
+
+    peaks: dict[str, dict] = {}
+    npy_dir = Path(gym_text_dir)
+    if not npy_dir.is_dir():
+        return peaks
+
+    for npy_file in sorted(npy_dir.glob('*_text.npy')):
+        try:
+            data = np.load(npy_file, allow_pickle=True).item()
+        except Exception:
+            continue
+        for payload in data.get('payloads', []):
+            aid = payload.get('athlete_id', '')
+            if not aid or aid in peaks:
+                continue
+            text = payload.get('text', '')
+            m = _COMP_LIFT_RE.search(text)
+            if m:
+                entry: dict = {
+                    'squat_peak_kg':    float(m.group(1)),
+                    'bench_peak_kg':    float(m.group(2)),
+                    'deadlift_peak_kg': float(m.group(3)),
+                }
+                prog = payload.get('primary_program', '')
+                if prog:
+                    entry['primary_program'] = prog
+                peaks[aid] = entry
+
+    return peaks
+
+
+def patch_corpus_with_peaks(corpus: list[dict], peaks: dict[str, dict]) -> int:
+    """Patch BM25 corpus records in-place with competition lift peak data.
+
+    Returns the number of records that were updated.
+    """
+    updated = 0
+    for record in corpus:
+        aid = record.get('athlete_id', '')
+        if aid in peaks:
+            record.update(peaks[aid])
+            updated += 1
+    return updated
+
 
 def _tokenize(text: str) -> list[str]: 
     text = text.lower()
