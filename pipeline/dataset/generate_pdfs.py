@@ -531,7 +531,12 @@ def _build_chart(ct, sessions, summary, athlete_id, ratios, v,
 
 def _compute_dataset_max_ratios(sessions, summary):
     bw     = sessions.drop_duplicates("athlete_id")[["athlete_id","bodyweight_kg"]]
-    merged = summary.merge(bw, on="athlete_id"); out = {}
+    merged = summary.merge(bw, on="athlete_id")
+    # Force numeric — pandas may read these as Arrow string dtype when pyarrow
+    # is installed, which causes ArrowInvalid on division.
+    merged["competition_1rm_kg"] = pd.to_numeric(merged["competition_1rm_kg"], errors="coerce")
+    merged["bodyweight_kg"]      = pd.to_numeric(merged["bodyweight_kg"],      errors="coerce")
+    out = {}
     for lift in LIFT_ORDER:
         sub = merged[merged["lift"] == lift]
         out[lift] = float((sub["competition_1rm_kg"]/sub["bodyweight_kg"]).max()) if not sub.empty else 1.0
@@ -1022,8 +1027,10 @@ def main():
     if args.no_randomise:
         cfg["variation"]["randomise"] = False
 
-    sessions = pd.read_csv(args.sessions)
-    summary  = pd.read_csv(args.summary)
+    # dtype_backend="numpy_nullable" prevents pandas from using Arrow string
+    # dtypes (which fail on arithmetic) when pyarrow is installed.
+    sessions = pd.read_csv(args.sessions, dtype_backend="numpy_nullable")
+    summary  = pd.read_csv(args.summary,  dtype_backend="numpy_nullable")
     out_dir  = PDF_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
 
