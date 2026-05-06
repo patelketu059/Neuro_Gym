@@ -995,17 +995,19 @@ def generate_athlete_pdf(athlete_id, sessions, summary, out_dir,
 # Path resolution — generate_pdfs.py lives at gym_rag/ root, so:
 #   gym_rag/config/pdf_config.toml  → _DEFAULT_CONFIG_PATH
 #   gym_rag/data/pdfs/              → _DEFAULT_PDF_DIR
-_SCRIPT_DIR        = Path(__file__).resolve().parent
+_SCRIPT_DIR          = Path(__file__).resolve().parent.parent.parent  # project root
 _DEFAULT_CONFIG_PATH = _SCRIPT_DIR / "config" / "pdf_config.toml"
 _DEFAULT_PDF_DIR     = _SCRIPT_DIR / "data"   / "pdfs"
+_DEFAULT_SESSIONS    = _SCRIPT_DIR / "data"   / "output" / "sessions.csv"
+_DEFAULT_SUMMARY     = _SCRIPT_DIR / "data"   / "output" / "block_summary.csv"
 
 
 def main():
     parser = argparse.ArgumentParser(
         description="Generate athlete PDFs with configurable variation",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument("--sessions",     default="sessions.csv")
-    parser.add_argument("--summary",      default="block_summary.csv")
+    parser.add_argument("--sessions",     default=str(_DEFAULT_SESSIONS))
+    parser.add_argument("--summary",      default=str(_DEFAULT_SUMMARY))
     parser.add_argument("--prog-summary", default=None)
     parser.add_argument("--out-dir",      default=str(_DEFAULT_PDF_DIR))
     parser.add_argument("--config",       default=str(_DEFAULT_CONFIG_PATH),
