@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from config.rag_config import (
     INTENT_CONTEXT_TOKENS, DEFAULT_CONTEXT_TOKENS,
-    TOP_K_HYBRID, TOP_K_RERANK, TOP_K_ATHLETES,
+    TOP_K_HYBRID, TOP_K_RERANK, TOP_K_ATHLETES, TOP_K_PER_ATHLETE_CHUNKS,
     TEXT_ONLY_INTENTS,
 )
 
@@ -210,7 +210,8 @@ def retrieve(
 
     deduped = deduplicate_athlete(
         ranked,
-        top_k = top_k_athletes
+        top_k             = top_k_athletes,
+        top_k_per_athlete = TOP_K_PER_ATHLETE_CHUNKS,
     )
 
     context = assemble_context(deduped, max_tokens = max_context_tokens)

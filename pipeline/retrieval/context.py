@@ -1,23 +1,61 @@
 from __future__ import annotations
 
+# Fields carried from Qdrant gym_text / BM25 payloads into whichever chunk wins
+# deduplication, so profile cards always render even when gym_tables payloads
+# were indexed before these columns were added to the dataset.
+_PROFILE_FIELDS = ("squat_peak_kg", "bench_peak_kg", "deadlift_peak_kg", "primary_program")
+
+
 def deduplicate_athlete(
         results: list[dict],
-        top_k: int = 5
+        top_k: int = 5,
+        top_k_per_athlete: int = 3,
 ) -> list[dict]:
-    
-    seen: dict[str, dict] = {}
-    ordered: list[str] = []
+    """Keep up to *top_k_per_athlete* highest-scoring chunks for each of up to
+    *top_k* distinct athletes.
+
+    Also merges profile fields (squat/bench/deadlift peaks, program) from every
+    result for the same athlete into whichever chunk wins, so profile cards in
+    the UI render correctly even when the winning Qdrant payload pre-dates the
+    addition of those columns.
+    """
+    # athlete_id → [(score, result), ...]
+    buckets:  dict[str, list[tuple[float, dict]]] = {}
+    # athlete_id → best non-zero profile field values seen across all results
+    profiles: dict[str, dict] = {}
+    ordered:  list[str] = []
 
     for r in results:
-        aid = r.get("payload", {}).get("athlete_id", "")
+        aid   = r.get("payload", {}).get("athlete_id", "")
         score = r.get("rerank_score") or r.get("rrf_score") or r.get("score", 0.0)
+        pay   = r.get("payload", {})
 
-        if aid not in seen:
-            seen[aid] = {**r, "_dedup_score": score}
+        if aid not in buckets:
+            buckets[aid]  = []
+            profiles[aid] = {}
             ordered.append(aid)
-        elif score > seen[aid]['_dedup_score']:
-            seen[aid] = {**r, "_dedup_score": score}
-    return [seen[aid] for aid in ordered[:top_k]]
+
+        buckets[aid].append((score, r))
+
+        # Harvest any non-zero profile field from this result
+        for field in _PROFILE_FIELDS:
+            val = pay.get(field)
+            if val and field not in profiles[aid]:
+                profiles[aid][field] = val
+
+    output: list[dict] = []
+    for aid in ordered[:top_k]:
+        # Sort descending by score; keep the top N week-chunks
+        top_chunks = sorted(buckets[aid], key=lambda x: x[0], reverse=True)[:top_k_per_athlete]
+        patch = profiles[aid]
+        for _, r in top_chunks:
+            if patch:
+                merged_payload = {**r.get("payload", {}), **patch}
+                output.append({**r, "payload": merged_payload})
+            else:
+                output.append(r)
+
+    return output
 
 
 _CHARS_TO_TOKEN = 3
@@ -117,11 +155,13 @@ def assemble_context(
             'collection': collection,
             'score': round(score, 4),
             'pdf_path': pdf_path,
+            # Use truthiness (not `is not None`) so 0 / 0.0 / "" are excluded
+            # and the UI shows "?kg" instead of "0.0kg" for genuinely missing lifts.
             'payload': {
                 k: payload.get(k)
                 for k in ("training_level", "dots", "squat_peak_kg",
                           "bench_peak_kg", "deadlift_peak_kg", "primary_program")
-                if payload.get(k) is not None
+                if payload.get(k)
             }
         }
 
