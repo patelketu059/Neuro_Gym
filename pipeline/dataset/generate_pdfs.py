@@ -1027,10 +1027,28 @@ def main():
     if args.no_randomise:
         cfg["variation"]["randomise"] = False
 
-    # dtype_backend="numpy_nullable" prevents pandas from using Arrow string
-    # dtypes (which fail on arithmetic) when pyarrow is installed.
-    sessions = pd.read_csv(args.sessions, dtype_backend="numpy_nullable")
-    summary  = pd.read_csv(args.summary,  dtype_backend="numpy_nullable")
+    sessions = pd.read_csv(args.sessions)
+    summary  = pd.read_csv(args.summary)
+
+    # Explicitly coerce all numeric columns used by charting code.
+    # Needed because pandas uses Arrow string dtypes when pyarrow is installed,
+    # which silently stores numbers as strings and then fails on min/max/div.
+    _SESSION_NUMERIC = [
+        "age", "bodyweight_kg", "squat_peak_kg", "bench_peak_kg",
+        "deadlift_peak_kg", "total_kg", "dots", "week", "day_index",
+        "main_lift_kg", "main_lift_pct_of_peak", "main_lift_rpe",
+        "volume_pct", "main_lift_delta_kg", "opl_row_index",
+    ]
+    _SUMMARY_NUMERIC = [
+        "competition_1rm_kg", "bodyweight_kg", "training_1rm_kg",
+        "peak_week", "week",
+    ]
+    for col in _SESSION_NUMERIC:
+        if col in sessions.columns:
+            sessions[col] = pd.to_numeric(sessions[col], errors="coerce")
+    for col in _SUMMARY_NUMERIC:
+        if col in summary.columns:
+            summary[col] = pd.to_numeric(summary[col], errors="coerce")
     out_dir  = PDF_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
 
