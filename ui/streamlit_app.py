@@ -450,7 +450,7 @@ with chat_col:
 
         # Persist the assistant message + update PDF panel state
         st.session_state.messages.append(assistant_msg)
-        st.session_state.pdf_paths = (result["pdf_paths"] or [])[:5]
+        st.session_state.pdf_paths = (meta.get("pdf_paths") or [])[:5]
         st.session_state.pdf_index = 0
 
         st.rerun()
