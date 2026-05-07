@@ -9,6 +9,10 @@ from pydantic import BaseModel
 
 router = APIRouter()
 
+_MAX_QUERY_CHARS = 2000
+_MAX_IMAGE_BYTES = 10 * 1024 * 1024  # 10 MB
+_ALLOWED_MIME    = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+
 
 class ChatResponse(BaseModel):
     response: str
@@ -36,14 +40,22 @@ async def chat(
     config_name: str        = Form(default='F — all + BM25'),
     image:       UploadFile = File(default=None),
 ):
+    if len(query) > _MAX_QUERY_CHARS:
+        raise HTTPException(status_code=422, detail=f"Query exceeds {_MAX_QUERY_CHARS} characters.")
+
     state = request.app.state
     tmp_image_path: str | None = None
 
     try:
         if image and image.filename:
+            if image.content_type and image.content_type not in _ALLOWED_MIME:
+                raise HTTPException(status_code=422, detail=f"Unsupported image type: {image.content_type}")
+            image_data = await image.read()
+            if len(image_data) > _MAX_IMAGE_BYTES:
+                raise HTTPException(status_code=413, detail="Image exceeds 10 MB limit.")
             suffix = Path(image.filename).suffix or '.png'
             with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-                tmp.write(await image.read())
+                tmp.write(image_data)
                 tmp_image_path = tmp.name
 
         from app.chain import run_chain
@@ -84,13 +96,23 @@ async def chat_stream(
     text tokens (``"Hello"``).  The final event is a JSON object with
     ``"__done__": true`` and all metadata (sources, timing, athlete_ids, …).
     """
-    state = request.app.state
-    tmp_image_path: str | None = None
+    if len(query) > _MAX_QUERY_CHARS:
+        raise HTTPException(status_code=422, detail=f"Query exceeds {_MAX_QUERY_CHARS} characters.")
 
+    state = request.app.state
+
+    # Validate and buffer image before entering the sync generator so async
+    # reads and HTTPException can propagate correctly.
+    tmp_image_path: str | None = None
     if image and image.filename:
+        if image.content_type and image.content_type not in _ALLOWED_MIME:
+            raise HTTPException(status_code=422, detail=f"Unsupported image type: {image.content_type}")
+        image_data = await image.read()
+        if len(image_data) > _MAX_IMAGE_BYTES:
+            raise HTTPException(status_code=413, detail="Image exceeds 10 MB limit.")
         suffix = Path(image.filename).suffix or '.png'
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-            tmp.write(await image.read())
+            tmp.write(image_data)
             tmp_image_path = tmp.name
 
     from app.chain import run_chain_stream
@@ -110,7 +132,8 @@ async def chat_stream(
             ):
                 yield f"data: {chunk}\n\n"
         except Exception as e:
-            yield f"data: {json.dumps({'__error__': str(e)})}\n\n"
+            # Include __done__ so the client SSE parser terminates cleanly.
+            yield f"data: {json.dumps({'__error__': str(e), '__done__': True})}\n\n"
         finally:
             if tmp_image_path:
                 Path(tmp_image_path).unlink(missing_ok=True)
