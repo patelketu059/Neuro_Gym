@@ -5,7 +5,7 @@ Strategy (no hallucination):
   1. For each question, pull the relevant athlete's raw session rows directly
      from the Qdrant `gym_tables` and `gym_text` collections (payload-only —
      no vector search, no LLM inference at retrieval time).
-  2. Feed the raw payload data to Gemini 2.0 Flash with a strict "cite only
+  2. Feed the raw payload data to Gemini with a strict "cite only
      what the data says" prompt.
   3. Write the output to eval/golden_answers.json — one entry per question_id.
 
@@ -17,6 +17,7 @@ Usage:
     python eval/generate_references.py --limit 10       # smoke test first 10
     python eval/generate_references.py --out eval/golden_answers.json
     python eval/generate_references.py --overwrite      # regenerate all
+    python eval/generate_references.py --delay 5        # slower pacing for free-tier quota
 
 Output format:
     {
@@ -30,6 +31,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -39,7 +41,20 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from config.model_settings import GEMINI_AUX_MODEL
 from eval.question_bank import GOLDEN_QUESTIONS
+
+_RETRY_DELAYS = (5.0, 15.0, 45.0)
+
+
+def _is_rate_limited(exc: Exception) -> bool:
+    msg = str(exc)
+    return "429" in msg or "RESOURCE_EXHAUSTED" in msg
+
+
+def _suggested_delay(exc: Exception) -> float:
+    m = re.search(r'retryDelay["\s:\']+(\d+)s', str(exc))
+    return float(m.group(1)) if m else 0.0
 
 
 # ── Env loading ───────────────────────────────────────────────────────────────
@@ -155,23 +170,40 @@ def _generate_reference(
     query: str,
     data_text: str,
     gemini,
-) -> str:
+) -> str | None:
+    """Return the reference answer string, or None if all retries fail."""
     from google.genai import types
 
     prompt = _REFERENCE_HUMAN.format(data=data_text, query=query)
-    try:
-        resp = gemini.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=_REFERENCE_SYSTEM,
-                temperature=0.0,
-                max_output_tokens=300,
-            ),
-        )
-        return resp.text.strip()
-    except Exception as e:
-        return f"[ERROR generating reference: {e}]"
+    config = types.GenerateContentConfig(
+        system_instruction=_REFERENCE_SYSTEM,
+        temperature=0.0,
+        max_output_tokens=300,
+    )
+
+    last_exc: Exception | None = None
+    for attempt, fallback_delay in enumerate([0.0, *_RETRY_DELAYS]):
+        if fallback_delay:
+            time.sleep(fallback_delay)
+        try:
+            resp = gemini.models.generate_content(
+                model=GEMINI_AUX_MODEL,
+                contents=prompt,
+                config=config,
+            )
+            return resp.text.strip()
+        except Exception as exc:
+            if _is_rate_limited(exc):
+                wait = _suggested_delay(exc) or fallback_delay or _RETRY_DELAYS[0]
+                print(f"    [RATE LIMIT] waiting {wait:.0f}s (attempt {attempt + 1}/{len(_RETRY_DELAYS) + 1})")
+                time.sleep(wait)
+                last_exc = exc
+            else:
+                last_exc = exc
+                break
+
+    print(f"    [ERROR] failed after retries: {last_exc}")
+    return None
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -184,6 +216,8 @@ def main() -> int:
                         help="Regenerate answers even if they already exist in --out")
     parser.add_argument("--max-records", type=int, default=60,
                         help="Max Qdrant records per athlete per collection")
+    parser.add_argument("--delay", type=float, default=3.0,
+                        help="Seconds to wait between questions (default 3.0)")
     args = parser.parse_args()
 
     _load_env()
@@ -263,17 +297,20 @@ def main() -> int:
             continue
 
         ref = _generate_reference(q["query"], data_text, gemini)
-        answers[qid] = ref
-        generated += 1
-        preview = ref[:120].replace("\n", " ")
-        print(f"    → {preview}{'…' if len(ref) > 120 else ''}")
+        if ref is None:
+            print(f"    [SKIP] {qid} — generation failed, will retry on next run")
+            errors += 1
+        else:
+            answers[qid] = ref
+            generated += 1
+            preview = ref[:120].replace("\n", " ")
+            print(f"    → {preview}{'…' if len(ref) > 120 else ''}")
 
-        # Brief pause to respect Gemini free tier rate limits
-        time.sleep(0.5)
+        # Write after every question so progress is never lost on interruption
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(json.dumps(answers, indent=2, ensure_ascii=False), encoding="utf-8")
 
-    # Write output
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(json.dumps(answers, indent=2, ensure_ascii=False), encoding="utf-8")
+        time.sleep(args.delay)
 
     print(f"\n[INFO] Done — {generated} generated, {skipped} skipped, {errors} data-unavailable")
     print(f"[INFO] Written to {args.out}")
