@@ -1,7 +1,10 @@
 from __future__ import annotations
+import re
 import time
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+_ATHLETE_ID_RE = re.compile(r'athlete_\d{5}')
 
 from config.rag_config import (
     INTENT_CONTEXT_TOKENS, DEFAULT_CONTEXT_TOKENS,
@@ -55,16 +58,21 @@ def multi_retrieve(
     if not text_collections: return []
 
     def _search_one(q: str) -> list[dict]:
-        vec = embed_query(q, api_key = openrouter_api_key)
+        # Scope filter to only the athlete(s) mentioned in this sub-query.
+        # Without this, every sub-query gets results from all comparison athletes
+        # and RRF scrambles them together before deduplication.
+        query_aids = _ATHLETE_ID_RE.findall(q)
+        q_filter = {**(filters or {}), 'athlete_ids': query_aids} if query_aids else filters
+
+        vec = embed_query(q, api_key=openrouter_api_key)
         if not vec: return []
         results = dense_search_all(
-            query_vector = vec,
-            client = client,
-            collections = text_collections,
-            top_k = top_k,
-            filters = filters
+            query_vector=vec,
+            client=client,
+            collections=text_collections,
+            top_k=top_k,
+            filters=q_filter,
         )
-
         flat: list[dict] = []
         for r in results:
             flat.extend(r)
@@ -208,11 +216,22 @@ def retrieve(
         top_k = top_k_rerank,
     )
 
-    deduped = deduplicate_athlete(
-        ranked,
-        top_k             = top_k_athletes,
-        top_k_per_athlete = TOP_K_PER_ATHLETE_CHUNKS,
-    )
+    # Comparison: cap per-athlete chunks so both athletes get fair representation.
+    # Factual/trend: allow all ranked chunks through for a single athlete so a
+    # specific week is never crowded out by a higher-scoring but less-relevant chunk.
+    n_athletes = len((filters or {}).get('athlete_ids', []))
+    if intent == 'comparison' and n_athletes >= 2:
+        deduped = deduplicate_athlete(
+            ranked,
+            top_k=top_k_athletes * n_athletes,
+            top_k_per_athlete=TOP_K_PER_ATHLETE_CHUNKS,
+        )
+    else:
+        deduped = deduplicate_athlete(
+            ranked,
+            top_k=top_k_athletes,
+            top_k_per_athlete=top_k_rerank,  # effectively uncapped for single-athlete
+        )
 
     context = assemble_context(deduped, max_tokens = max_context_tokens)
     context['retrieval_ms'] = int((time.perf_counter() - t0) * 1000)
