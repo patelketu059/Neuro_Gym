@@ -41,7 +41,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from config.model_settings import GEMINI_AUX_MODEL
+from config.model_settings import GEMINI_GENERATION_MODEL
 from eval.question_bank import GOLDEN_QUESTIONS
 
 _RETRY_DELAYS = (5.0, 15.0, 45.0)
@@ -187,7 +187,7 @@ def _generate_reference(
             time.sleep(fallback_delay)
         try:
             resp = gemini.models.generate_content(
-                model=GEMINI_AUX_MODEL,
+                model=GEMINI_GENERATION_MODEL,
                 contents=prompt,
                 config=config,
             )
