@@ -14,12 +14,6 @@ from config.rag_config import HYDE_INTENTS
 
 ATHLETE_ID_RE = re.compile(r'athlete_\d{5}')
 
-# Matches: "athlete 89", "athlete_89", "athlete89", "athlete #89", "athlete # 89",
-# "athlete 89s" (possessive without apostrophe). Trailing (?!\d) instead of \b
-# because \b fails when a letter immediately follows digits ("42s" has no \b
-# between "2" and "s" — both are word characters).
-_INFORMAL_ATHLETE_RE = re.compile(r'\bathlete[\s_]*#?\s*(\d{1,5})(?!\d)', re.IGNORECASE)
-
 PRONOUNS = re.compile(
     r'\b(their|his|her|they|them|that athlete|this athlete|same athlete|the athlete)\b',
     re.IGNORECASE,
@@ -31,41 +25,23 @@ _LEVEL_VALUES  = ("elite", "advanced", "intermediate", "novice")
 
 # ── ID normalisation ───────────────────────────────────────────────────────────
 
-def _normalize_athlete_refs(text: str) -> tuple[str, list[str]]:
-    """
-    Replace informal athlete references with zero-padded canonical IDs.
-    'athlete 89' -> 'athlete_00089'.
-    Returns (normalized_text, [athlete_00089, ...]).
-    """
-    found: list[str] = []
-
-    def _replace(m: re.Match) -> str:
-        canonical = f"athlete_{int(m.group(1)):05d}"
-        found.append(canonical)
-        return canonical
-
-    normalized = _INFORMAL_ATHLETE_RE.sub(_replace, text)
-    seen: set[str] = set()
-    unique = [aid for aid in found if not (aid in seen or seen.add(aid))]  # type: ignore[func-returns-value]
-    return normalized, unique
-
-
 def _parse_any_athlete_ref(value: str) -> str | None:
     """
     Parse any athlete ID variant into canonical form.
     Accepts: 'athlete_00089', 'athlete_89', 'athlete 89', '89' (bare number).
     Returns canonical string or None if unparseable.
     """
+    v = value.strip().lower()
     # Already canonical
-    if ATHLETE_ID_RE.fullmatch(value):
-        return value
-    # Informal format with prefix
-    m = _INFORMAL_ATHLETE_RE.match(value)
+    if ATHLETE_ID_RE.fullmatch(v):
+        return v
+    # "athlete_89", "athlete 89", "athlete #89" etc.
+    m = re.match(r'athlete[\s_#]*(\d{1,5})$', v)
     if m:
         return f"athlete_{int(m.group(1)):05d}"
     # Bare number
-    if value.isdigit() and len(value) <= 5:
-        return f"athlete_{int(value):05d}"
+    if v.isdigit() and 1 <= len(v) <= 5:
+        return f"athlete_{int(v):05d}"
     return None
 
 
@@ -84,8 +60,8 @@ class QueryAnalysis(BaseModel):
     athlete_ids: list[str] = Field(
         default_factory=list,
         description=(
-            "All athlete IDs relevant to this question. "
-            "Zero-pad to 5 digits: 'athlete 89' -> 'athlete_00089'. "
+            "All athlete IDs relevant to this question including bare numbers. "
+            "Zero-pad to 5 digits: '42' -> 'athlete_00042', '2424' -> 'athlete_02424'. "
             "Format: athlete_NNNNN. Empty list if no specific athlete mentioned."
         ),
     )
@@ -143,13 +119,15 @@ rewritten_query rules:
 
 athlete_ids rules:
 - List ALL athlete IDs relevant to this question
-- ALWAYS zero-pad to 5 digits: "athlete 89" → "athlete_00089", "athlete_7" → "athlete_00007"
+- Bare numbers in athlete context ARE athlete IDs — "compare 42 to 2424" means athlete_00042 vs athlete_02424
+- Numbers that are clearly weights (kg/lbs), weeks, RPE, or set counts are NOT athlete IDs
+- ALWAYS zero-pad to 5 digits: "42" → "athlete_00042", "2424" → "athlete_02424"
 - Format MUST be athlete_NNNNN (underscore + exactly 5 digits)
-- Empty list [] for general questions with no specific athlete
+- Empty list [] only for general questions with no specific athlete
 
 sub_queries rules:
 - ONLY populate when intent == "comparison"
-- One self-contained query per athlete, e.g. ["athlete_00088 deadlift progression", "athlete_03985 deadlift progression"]
+- One self-contained query per athlete, e.g. ["athlete_00042 squat progression", "athlete_02424 squat progression"]
 - Empty list [] for all other intents
 
 training_levels rules:
@@ -171,7 +149,6 @@ _PROMPT_TEMPLATE = ChatPromptTemplate.from_messages([
 
 
 def _build_chain(gemini_api_key: str):
-    """Build the LangChain structured-output chain (cached per process)."""
     llm = ChatGoogleGenerativeAI(
         model="gemini-2.0-flash",
         google_api_key=gemini_api_key,
@@ -205,7 +182,7 @@ def _call_combined(query: str, history: list[dict], gemini_api_key: str) -> Quer
     try:
         chain  = _get_chain(gemini_api_key)
         result = chain.invoke({"history": history_str, "query": query})
-        return result  # already a QueryAnalysis instance
+        return result
     except Exception as e:
         logging.warning("[augmentation] LangChain structured-output call failed: %s", e)
         return QueryAnalysis(
@@ -296,59 +273,53 @@ def augment(inputs: dict) -> dict:
     history   = memory.get_history()
     use_hyde  = inputs.get("use_hyde", True)
 
-    # Resolve API key from the Gemini client or environment
     gemini_api_key = (
         getattr(getattr(gemini, "_api_client", None), "api_key", None)
         or os.environ.get("GEMINI_API_KEY", "")
     )
 
-    # Always normalize before the early-exit so first messages still get athlete_ids
-    normalized_query, informal_ids = _normalize_athlete_refs(raw_query)
-
-    if not history or not gemini_api_key:
+    # Only skip LLM analysis when there is genuinely no API key.
+    # Empty history is fine — the LLM still extracts IDs and intent correctly;
+    # pronoun resolution simply has nothing to resolve on the first turn.
+    if not gemini_api_key:
         return {
             **inputs,
-            "retrieval_query":  normalized_query,
+            "retrieval_query":  raw_query,
             "hyde_vector":      [],
             "sub_queries":      [],
             "intent":           "factual",
-            "query_rewritten":  normalized_query != raw_query,
+            "query_rewritten":  False,
             "original_query":   raw_query,
-            "athlete_ids":      informal_ids,
+            "athlete_ids":      [],
             "training_levels":  [],
             "hyde_document":    "",
         }
 
-    # ── Step 2: pronoun resolution using history + normalized query ───────────
+    # ── Step 1: pronoun resolution ────────────────────────────────────────────
     register = EntityRegister()
     register.update_from_history(history)
-    register.update_from_text(normalized_query)
-    pronoun_resolved = register.resolve_pronouns(normalized_query)
+    register.update_from_text(raw_query)
+    pronoun_resolved = register.resolve_pronouns(raw_query)
 
-    # ── Step 3: LangChain structured analysis (intent + rewrite + IDs) ────────
+    # ── Step 2: LangChain structured analysis ─────────────────────────────────
+    # Handles intent, query rewrite, athlete ID extraction (including bare
+    # numbers like "42"), and training level detection. Pydantic validators
+    # in QueryAnalysis normalise every ID variant to athlete_NNNNN.
     analysis = _call_combined(pronoun_resolved, history, gemini_api_key)
 
-    # ── Step 4: merge regex IDs (ground truth) with LLM IDs ──────────────────
-    seen_ids: set[str] = set()
-    athlete_ids: list[str] = []
-    for aid in informal_ids + analysis.athlete_ids:
-        if aid not in seen_ids:
-            athlete_ids.append(aid)
-            seen_ids.add(aid)
-
-    # ── Step 5: HyDE for intents that benefit from it ─────────────────────────
+    # ── Step 3: HyDE for intents that benefit from it ─────────────────────────
     hyde_document: str | None = None
     if use_hyde and analysis.intent in HYDE_INTENTS:
         hyde_document = _generate_hyde_document(pronoun_resolved, gemini_api_key)
 
-    # ── Step 6: sub-query fallback for comparison intent ─────────────────────
+    # ── Step 4: sub-query fallback for comparison intent ─────────────────────
     sub_queries = analysis.sub_queries
     if analysis.intent == "comparison" and len(register.all_ids()) >= 2 and not sub_queries:
         sub_queries = [
             f"{aid} {analysis.rewritten_query}" for aid in register.all_ids()[:4]
         ]
 
-    # ── Step 7: embed HyDE document ───────────────────────────────────────────
+    # ── Step 5: embed HyDE document ───────────────────────────────────────────
     hyde_vector: list[float] = []
     if use_hyde and hyde_document and analysis.intent != "visual":
         try:
@@ -364,7 +335,7 @@ def augment(inputs: dict) -> dict:
         "pronoun_resolved": pronoun_resolved,
         "query_rewritten":  analysis.rewritten_query != raw_query,
         "intent":           analysis.intent,
-        "athlete_ids":      athlete_ids,
+        "athlete_ids":      analysis.athlete_ids,
         "sub_queries":      sub_queries,
         "hyde_document":    hyde_document or "",
         "hyde_vector":      hyde_vector,
