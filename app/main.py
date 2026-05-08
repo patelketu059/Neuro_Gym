@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -63,7 +64,21 @@ async def lifespan(app: FastAPI):
         print(f"[INFO-APP] - Gemini Key not set")
 
     app.state.pdf_dir = str(ROOT / 'data' / 'pdfs' / "pdfs_archive")
-    yield 
+
+    async def _eviction_loop():
+        from app.session_store import get_store
+        while True:
+            await asyncio.sleep(300)  # every 5 minutes
+            try:
+                get_store().evict_stale()
+            except Exception:
+                pass
+
+    eviction_task = asyncio.create_task(_eviction_loop())
+
+    yield
+
+    eviction_task.cancel()
     print(f"[INFO-APP] - Shutdown!")
 
 

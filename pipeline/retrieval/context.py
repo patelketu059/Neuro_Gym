@@ -1,4 +1,16 @@
 from __future__ import annotations
+import functools
+
+import tiktoken
+
+@functools.lru_cache(maxsize=1)
+def _get_tokenizer():
+    return tiktoken.get_encoding("cl100k_base")
+
+
+def _count_tokens(text: str) -> int:
+    return len(_get_tokenizer().encode(text))
+
 
 # Fields carried from Qdrant gym_text / BM25 payloads into whichever chunk wins
 # deduplication, so profile cards always render even when gym_tables payloads
@@ -58,7 +70,6 @@ def deduplicate_athlete(
     return output
 
 
-_CHARS_TO_TOKEN = 3
 _MAX_TEXT_TOKENS = 4096
 
 
@@ -134,7 +145,7 @@ def assemble_context(
 
         if aid and aid not in seen_aids and tokens_used < max_tokens:
             profile = _build_athlete_profile(payload)
-            profile_tokens = len(profile) // _CHARS_TO_TOKEN
+            profile_tokens = _count_tokens(profile)
             if tokens_used + profile_tokens < max_tokens:
                 text_part.append(profile)
                 tokens_used += profile_tokens
@@ -143,9 +154,9 @@ def assemble_context(
 
         text = payload.get("text", "").strip()
         if text and tokens_used < max_tokens:
-            budget_chars = (max_tokens - tokens_used) * _CHARS_TO_TOKEN
+            budget_chars = (max_tokens - tokens_used) * 4  # ~4 chars/token
             block = _passage_block(text, collection, payload, score, budget_chars)
-            block_tokens = len(block) // _CHARS_TO_TOKEN
+            block_tokens = _count_tokens(block)
             if block_tokens > 0:
                 text_part.append(block)
                 tokens_used += block_tokens
@@ -182,7 +193,7 @@ def assemble_context(
         "text_context": text_context,
         "pdf_paths":    pdf_paths,
         "sources":      sources,
-        "token_count":  len(text_context) // _CHARS_TO_TOKEN,
+        "token_count":  _count_tokens(text_context),
         "athlete_ids":  athlete_ids,
     }
 

@@ -2,9 +2,38 @@ from __future__ import annotations
 import base64
 import io
 import json as _json
+import logging
 import time
 from pathlib import Path
 from typing import Generator
+
+log = logging.getLogger(__name__)
+
+_RETRY_DELAYS = (1.0, 3.0, 9.0)
+_RETRYABLE_NAMES = ("ResourceExhausted", "ServiceUnavailable", "QuotaExceeded", "Unavailable")
+
+
+def _is_retryable(exc: Exception) -> bool:
+    name = type(exc).__name__
+    msg  = str(exc)
+    return any(s in name or s in msg for s in _RETRYABLE_NAMES) or "429" in msg or "503" in msg
+
+
+def _generate_with_retry(gemini, model: str, contents, config):
+    """Wrap generate_content with exponential backoff on transient Gemini errors."""
+    last_exc: Exception | None = None
+    for attempt, delay in enumerate([0.0] + list(_RETRY_DELAYS)):
+        if delay:
+            log.warning("[chain] Gemini transient error, retrying in %.0fs (attempt %d)", delay, attempt)
+            time.sleep(delay)
+        try:
+            return gemini.models.generate_content(model=model, contents=contents, config=config)
+        except Exception as exc:
+            if _is_retryable(exc):
+                last_exc = exc
+                continue
+            raise
+    raise last_exc  # type: ignore[misc]
 
 from config.model_settings import GEMINI_GENERATION_MODEL
 from config.rag_config import (
@@ -205,7 +234,8 @@ def generation(inputs: dict) -> dict:
     t0            = time.perf_counter()
     content_parts = _build_content_parts(inputs)
 
-    response = gemini.models.generate_content(
+    response = _generate_with_retry(
+        gemini   = gemini,
         model    = GEMINI_GENERATION_MODEL,
         contents = content_parts,
         config   = _build_gen_config(intent),
@@ -325,14 +355,28 @@ def run_chain_stream(
     t0          = time.perf_counter()
     full_answer = ""
 
-    for chunk in gemini.models.generate_content_stream(
-        model    = GEMINI_GENERATION_MODEL,
-        contents = content_parts,
-        config   = _build_gen_config(intent),
-    ):
-        if chunk.text:
-            full_answer += chunk.text
-            yield _json.dumps(chunk.text)
+    last_stream_exc: Exception | None = None
+    for attempt, delay in enumerate([0.0] + list(_RETRY_DELAYS)):
+        if delay:
+            log.warning("[chain] Stream transient error, retrying in %.0fs (attempt %d)", delay, attempt)
+            time.sleep(delay)
+        try:
+            for chunk in gemini.models.generate_content_stream(
+                model    = GEMINI_GENERATION_MODEL,
+                contents = content_parts,
+                config   = _build_gen_config(intent),
+            ):
+                if chunk.text:
+                    full_answer += chunk.text
+                    yield _json.dumps(chunk.text)
+            break  # stream completed — exit retry loop
+        except Exception as exc:
+            if _is_retryable(exc):
+                last_stream_exc = exc
+                continue
+            raise
+    else:
+        raise last_stream_exc  # type: ignore[misc]
 
     generation_ms = int((time.perf_counter() - t0) * 1000)
     memory.add_user_message(query)

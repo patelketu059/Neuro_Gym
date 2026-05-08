@@ -1,11 +1,19 @@
 from __future__ import annotations
+import functools
 import os
 import time
 from dataclasses import dataclass
 from typing import Literal
 
+import tiktoken
+
 from config.model_settings import GEMINI_AUX_MODEL
 from config.rag_config import SESSION_TTL_SECONDS
+
+
+@functools.lru_cache(maxsize=1)
+def _get_tokenizer():
+    return tiktoken.get_encoding("cl100k_base")
 
 
 @dataclass
@@ -15,7 +23,7 @@ class Message:
 
     @property
     def tokens(self) -> int:
-        return max(1, len(self.content) // 4)
+        return max(1, len(_get_tokenizer().encode(self.content)))
 
 
 class ConversationSummaryBufferMemory:
