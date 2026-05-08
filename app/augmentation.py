@@ -14,8 +14,11 @@ from config.rag_config import HYDE_INTENTS
 
 ATHLETE_ID_RE = re.compile(r'athlete_\d{5}')
 
-# Matches: "athlete 89", "athlete_89", "athlete89", "athlete #89", "athlete # 89"
-_INFORMAL_ATHLETE_RE = re.compile(r'\bathlete[\s_]*#?\s*(\d{1,5})\b', re.IGNORECASE)
+# Matches: "athlete 89", "athlete_89", "athlete89", "athlete #89", "athlete # 89",
+# "athlete 89s" (possessive without apostrophe). Trailing (?!\d) instead of \b
+# because \b fails when a letter immediately follows digits ("42s" has no \b
+# between "2" and "s" — both are word characters).
+_INFORMAL_ATHLETE_RE = re.compile(r'\bathlete[\s_]*#?\s*(\d{1,5})(?!\d)', re.IGNORECASE)
 
 PRONOUNS = re.compile(
     r'\b(their|his|her|they|them|that athlete|this athlete|same athlete|the athlete)\b',
