@@ -6,7 +6,7 @@ EMBEDDING_MODEL_ID = "nvidia/llama-nemotron-embed-vl-1b-v2"
 # Gemini model identifiers — centralised so chain.py, augmentation.py and
 # memory.py stay in sync without scattered string literals.
 GEMINI_GENERATION_MODEL = "gemini-2.5-flash"
-GEMINI_AUX_MODEL        = "gemini-2.0-flash"
+GEMINI_AUX_MODEL        = "gemini-2.0-flash-lite"   # query analysis + HyDE — lite is sufficient and has higher free-tier quota
 
 
 def _get_device() -> str:

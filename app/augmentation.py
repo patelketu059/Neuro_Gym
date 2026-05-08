@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, field_validator
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 
+from config.model_settings import GEMINI_AUX_MODEL
 from config.rag_config import HYDE_INTENTS
 
 # ── Regex patterns ─────────────────────────────────────────────────────────────
@@ -151,7 +152,7 @@ _PROMPT_TEMPLATE = ChatPromptTemplate.from_messages([
 
 def _build_chain(gemini_api_key: str):
     llm = ChatGoogleGenerativeAI(
-        model="gemini-2.0-flash",
+        model=GEMINI_AUX_MODEL,
         google_api_key=gemini_api_key,
         temperature=0.0,
         max_output_tokens=300,
@@ -254,7 +255,7 @@ def _generate_hyde_document(query: str, gemini_api_key: str) -> str | None:
             time.sleep(fallback_delay)
         try:
             llm = ChatGoogleGenerativeAI(
-                model="gemini-2.0-flash",
+                model=GEMINI_AUX_MODEL,
                 google_api_key=gemini_api_key,
                 temperature=0.4,
                 max_output_tokens=400,
