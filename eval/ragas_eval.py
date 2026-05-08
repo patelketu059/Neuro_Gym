@@ -58,10 +58,8 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-# Reuse the curated golden set rather than duplicating it. Single source of
-# truth for which questions both eval suites are scored against.
+from eval.question_bank import GOLDEN_QUESTIONS  # noqa: E402
 from eval.retrieval_eval import (  # noqa: E402
-    GOLDEN_QUESTIONS,
     _init_pipeline_state,
     _load_env_from_dotenv,
 )
