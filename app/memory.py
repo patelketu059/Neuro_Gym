@@ -184,17 +184,11 @@ class ConversationSummaryBufferMemory:
 
 
 # ── Session registry ──────────────────────────────────────────────────────────
-
-_sessions:    dict[str, ConversationSummaryBufferMemory] = {}
-_last_access: dict[str, float]                           = {}
-
-
-def _evict_stale() -> None:
-    cutoff = time.time() - SESSION_TTL_SECONDS
-    stale  = [sid for sid, ts in _last_access.items() if ts < cutoff]
-    for sid in stale:
-        _sessions.pop(sid, None)
-        _last_access.pop(sid, None)
+# No in-process cache — every request reads from SessionStore (Redis when
+# available, in-memory dict otherwise). This guarantees cache coherency across
+# multiple uvicorn workers: a turn handled by worker A is immediately visible
+# to worker B on the next request. The Redis round-trip is ~1 ms, dwarfed by
+# the LLM call that always follows.
 
 
 def get_or_create_memory(
@@ -203,38 +197,33 @@ def get_or_create_memory(
     k: int = 8,
     max_token_budget: int = 2000,
 ) -> ConversationSummaryBufferMemory:
+    from app.session_store import get_store
+    store = get_store()
+    try:
+        data = store.get(session_id)
+    except Exception:
+        data = None
 
-    _evict_stale()
-
-    if session_id not in _sessions:
-        # Try to restore from persistent store (Redis or in-memory fallback)
-        try:
-            from app.session_store import get_store
-            data = get_store().get(session_id)
-            if data:
-                mem = ConversationSummaryBufferMemory.from_dict(data, gemini=gemini)
-            else:
-                mem = ConversationSummaryBufferMemory(
-                    session_id=session_id, gemini=gemini,
-                    k=k, max_token_budget=max_token_budget,
-                )
-        except Exception:
-            mem = ConversationSummaryBufferMemory(
-                session_id=session_id, gemini=gemini,
-                k=k, max_token_budget=max_token_budget,
-            )
-        _sessions[session_id] = mem
+    if data:
+        mem = ConversationSummaryBufferMemory.from_dict(data, gemini=gemini)
     else:
-        if gemini is not None:
-            _sessions[session_id].gemini = gemini
+        mem = ConversationSummaryBufferMemory(
+            session_id=session_id, gemini=gemini,
+            k=k, max_token_budget=max_token_budget,
+        )
+        try:
+            store.set(session_id, mem.to_dict())
+        except Exception:
+            pass
 
-    _last_access[session_id] = time.time()
-    return _sessions[session_id]
+    try:
+        store.touch(session_id)
+    except Exception:
+        pass
+    return mem
 
 
 def clear_memory(session_id: str) -> None:
-    _sessions.pop(session_id, None)
-    _last_access.pop(session_id, None)
     try:
         from app.session_store import get_store
         get_store().delete(session_id)
@@ -243,4 +232,16 @@ def clear_memory(session_id: str) -> None:
 
 
 def active_sessions() -> list[str]:
-    return list(_sessions.keys())
+    """Return list of active session IDs from the persistent store.
+
+    Note: Only available with the in-memory fallback backend. With Redis,
+    enumerate via `redis-cli --scan --pattern 'session:*'` instead.
+    """
+    try:
+        from app.session_store import get_store
+        store = get_store()
+        if store.backend == "memory":
+            return list(store._mem.keys())
+    except Exception:
+        pass
+    return []

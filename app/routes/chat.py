@@ -23,6 +23,12 @@ class ChatResponse(BaseModel):
 
     retrieval_ms: int
     generation_ms: int
+    # Token usage (Gemini usage_metadata)
+    input_tokens:    int = 0
+    output_tokens:   int = 0
+    thinking_tokens: int = 0
+    # Full assembled context string — used by eval harness for RAGAS scoring
+    text_context: str = ""
 
     config_name: str
     intent: str = 'factual'

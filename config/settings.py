@@ -65,38 +65,6 @@ STRENGTH_GOAL_KEYWORDS = {
 }
 
 # SESSION STRUCTURE
-# SESSION_FOCUS: dict[int, dict] = {
-#     0: {
-#         "label": "Lower A",
-#         "body_keywords": [
-#             "squat", "leg", "lunge", "hamstring", "glute",
-#             "hip", "calf", "quad", "bulgarian", "goblet",
-#         ],
-#     },
-#     1: {
-#         "label": "Upper A",
-#         "body_keywords": [
-#             "bench", "press", "chest", "shoulder", "tricep",
-#             "push", "dip", "fly", "pec", "incline", "decline",
-#         ],
-#     },
-#     2: {
-#         "label": "Lower B",
-#         "body_keywords": [
-#             "deadlift", "row", "cleans", "back", "lat", "trap",
-#             "bicep", "curl", "rdl", "romanian", "rack",
-#         ],
-#     },
-#     3: {
-#         "label": "Upper B",
-#         "body_keywords": [
-#             "overhead", "ohp", "shoulder", "press", "lateral",
-#             "raise", "tricep", "dip", "push", "deltoid", "shrug",
-#         ],
-#     },
-# }
-
-
 SESSION_FOCUS: dict[int, dict] = {
     0: {
         "label": "Lower A",

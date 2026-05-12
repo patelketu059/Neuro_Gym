@@ -63,7 +63,7 @@ async def lifespan(app: FastAPI):
         app.state.gemini = None
         print(f"[INFO-APP] - Gemini Key not set")
 
-    app.state.pdf_dir = str(ROOT / 'data' / 'pdfs' / "pdfs_archive")
+    app.state.pdf_dir = str(ROOT / 'data')
 
     async def _eviction_loop():
         from app.session_store import get_store

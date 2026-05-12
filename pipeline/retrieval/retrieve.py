@@ -34,11 +34,56 @@ CONFIGS: dict[str, RetrievalConfig] = {
     "H — BM25 only":        RetrievalConfig("H — BM25 only",         [],                              use_bm25=True),
 }
 
+# ASCII slug aliases — preferred for HTTP clients to avoid UTF-8 mangling of the
+# em-dash. Keys here resolve to the same RetrievalConfig as the canonical em-dash
+# entries above. Both forms work; new code should use the slug.
+CONFIG_ALIASES: dict[str, str] = {
+    "A-images":      "A — images only",
+    "B-text":        "B — text only",
+    "C-tables":      "C — tables only",
+    "D-all-dense":   "D — all dense",
+    "E-tables-bm25": "E — tables + BM25",
+    "F-all-bm25":    "F — all + BM25",
+    "G-rerank":      "G — hybrid + rerank",
+    "H-bm25":        "H — BM25 only",
+}
+
 DEFAULT_CONFIG = "F — all + BM25"  # em-dash, matches CONFIGS keys
+
+
+def _alpha_key(name: str) -> str:
+    """Reduce a config name to lowercase alphanumeric characters.
+
+    'F — all + BM25', 'F-all-bm25', 'F â€" all + BM25', 'F  all  BM25'
+    all collapse to 'fallbm25'. This makes the lookup robust against
+    em-dash mojibake (Windows-1252, Latin-1, double-UTF-8) and trivial
+    formatting differences without enumerating every corruption pattern.
+    """
+    return "".join(ch for ch in name.lower() if ch.isascii() and ch.isalnum())
+
+
+_NORMALIZED_CONFIGS: dict[str, str] = {
+    _alpha_key(canon): canon for canon in CONFIGS
+}
+_NORMALIZED_CONFIGS.update({
+    _alpha_key(slug): canon for slug, canon in CONFIG_ALIASES.items()
+})
+
+
+def _normalize_config_name(name: str) -> str:
+    if name in CONFIGS:
+        return name
+    if name in CONFIG_ALIASES:
+        return CONFIG_ALIASES[name]
+    return _NORMALIZED_CONFIGS.get(_alpha_key(name), name)
+
+
 def get_config(name: str) -> RetrievalConfig:
-    if name not in CONFIGS:
-        raise ValueError(f"Unknown config '{name}'. Valid: {list(CONFIGS)}")
-    return CONFIGS[name]
+    canonical = _normalize_config_name(name)
+    if canonical not in CONFIGS:
+        valid = list(CONFIGS) + list(CONFIG_ALIASES)
+        raise ValueError(f"Unknown config '{name}'. Valid: {valid}")
+    return CONFIGS[canonical]
 
 
 def multi_retrieve(

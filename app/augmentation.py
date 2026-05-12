@@ -169,22 +169,6 @@ def _get_chain(gemini_api_key: str):
     return _chain_cache[gemini_api_key]
 
 
-# ── Retry helpers ─────────────────────────────────────────────────────────────
-
-_RETRY_DELAYS = (2.0, 8.0, 30.0)  # seconds between attempts 1→2, 2→3, 3→4
-
-def _is_rate_limited(exc: Exception) -> bool:
-    msg = str(exc)
-    return (
-        "429" in msg
-        or "RESOURCE_EXHAUSTED" in msg
-        or "ResourceExhausted" in type(exc).__name__
-    )
-
-def _suggested_delay(exc: Exception) -> float:
-    """Extract Google's retryDelay value from the error string if present."""
-    m = re.search(r'retryDelay["\s:\']+(\d+)s', str(exc))
-    return float(m.group(1)) if m else 0.0
 
 
 # ── Combined analysis ──────────────────────────────────────────────────────────
@@ -199,35 +183,18 @@ def _call_combined(query: str, history: list[dict], gemini_api_key: str) -> Quer
         for m in context_msgs
     ) or "None"
 
-    last_exc: Exception | None = None
-    for attempt, fallback_delay in enumerate([0.0, *_RETRY_DELAYS]):
-        if fallback_delay:
-            time.sleep(fallback_delay)
-        try:
-            chain  = _get_chain(gemini_api_key)
-            result = chain.invoke({"history": history_str, "query": query})
-            return result
-        except Exception as exc:
-            if _is_rate_limited(exc):
-                wait = _suggested_delay(exc) or fallback_delay or _RETRY_DELAYS[0]
-                logging.warning(
-                    "[augmentation] Rate limited, waiting %.0fs (attempt %d/%d)",
-                    wait, attempt + 1, len(_RETRY_DELAYS) + 1,
-                )
-                time.sleep(wait)
-                last_exc = exc
-            else:
-                last_exc = exc
-                break
-
-    logging.warning("[augmentation] _call_combined failed after retries: %s", last_exc)
-    return QueryAnalysis(
-        intent="factual",
-        rewritten_query=query,
-        athlete_ids=[],
-        sub_queries=[],
-        training_levels=[],
-    )
+    try:
+        chain  = _get_chain(gemini_api_key)
+        return chain.invoke({"history": history_str, "query": query})
+    except Exception as exc:
+        logging.warning("[augmentation] _call_combined failed: %s", exc)
+        return QueryAnalysis(
+            intent="factual",
+            rewritten_query=query,
+            athlete_ids=[],
+            sub_queries=[],
+            training_levels=[],
+        )
 
 
 # ── HyDE ──────────────────────────────────────────────────────────────────────
@@ -248,37 +215,30 @@ TRAINING RECORD PASSAGE:\
 _HYDE_TEMPLATE = ChatPromptTemplate.from_messages([("human", _HYDE_PROMPT)])
 
 
-def _generate_hyde_document(query: str, gemini_api_key: str) -> str | None:
-    last_exc: Exception | None = None
-    for attempt, fallback_delay in enumerate([0.0, *_RETRY_DELAYS]):
-        if fallback_delay:
-            time.sleep(fallback_delay)
-        try:
-            llm = ChatGoogleGenerativeAI(
-                model=GEMINI_AUX_MODEL,
-                google_api_key=gemini_api_key,
-                temperature=0.4,
-                max_output_tokens=400,
-            )
-            chain    = _HYDE_TEMPLATE | llm
-            response = chain.invoke({"query": query})
-            text = response.content.strip()
-            return text if text else None
-        except Exception as exc:
-            if _is_rate_limited(exc):
-                wait = _suggested_delay(exc) or fallback_delay or _RETRY_DELAYS[0]
-                logging.warning(
-                    "[augmentation] HyDE rate limited, waiting %.0fs (attempt %d/%d)",
-                    wait, attempt + 1, len(_RETRY_DELAYS) + 1,
-                )
-                time.sleep(wait)
-                last_exc = exc
-            else:
-                last_exc = exc
-                break
+_hyde_chain_cache: dict = {}
 
-    logging.warning("[augmentation] HyDE generation failed after retries: %s", last_exc)
-    return None
+
+def _get_hyde_chain(gemini_api_key: str):
+    if gemini_api_key not in _hyde_chain_cache:
+        llm = ChatGoogleGenerativeAI(
+            model=GEMINI_AUX_MODEL,
+            google_api_key=gemini_api_key,
+            temperature=0.4,
+            max_output_tokens=400,
+        )
+        _hyde_chain_cache[gemini_api_key] = _HYDE_TEMPLATE | llm
+    return _hyde_chain_cache[gemini_api_key]
+
+
+def _generate_hyde_document(query: str, gemini_api_key: str) -> str | None:
+    try:
+        chain    = _get_hyde_chain(gemini_api_key)
+        response = chain.invoke({"query": query})
+        text = response.content.strip()
+        return text if text else None
+    except Exception as exc:
+        logging.warning("[augmentation] HyDE generation failed: %s", exc)
+        return None
 
 
 # ── Entity register (pronoun resolution) ─────────────────────────────────────

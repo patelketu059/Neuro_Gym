@@ -41,9 +41,11 @@ BM25_OVERSAMPLE_LEVEL:   int = 4    # when filtering by training_level only
 HYDE_INTENTS: FrozenSet[str] = frozenset({"trend", "coaching"})
 
 # ── Intent-adaptive collection routing ───────────────────────────────────────
-# Factual and trend queries are answered purely from text records — images add
-# noise and latency without improving answer quality for these intents.
-TEXT_ONLY_INTENTS: FrozenSet[str] = frozenset({"factual", "trend"})
+# Sets × reps for main lifts live only in PDFs (gym_images), not in structured
+# tables. Factual queries about specific athletes need PDF page retrieval to
+# answer sets/reps questions. Only "trend" stays text-only (aggregates over time,
+# images add noise without improving week-by-week progression answers).
+TEXT_ONLY_INTENTS: FrozenSet[str] = frozenset({"trend"})
 
 # ── Gemini generation ─────────────────────────────────────────────────────────
 GENERATION_TEMPERATURE: float = 0.3
@@ -52,7 +54,7 @@ GENERATION_MAX_TOKENS:  int   = 1024
 # Thinking mode — Gemini 2.5 Flash extended thinking.
 # Requires temperature = 1.0 when enabled (SDK requirement).
 THINKING_INTENTS: FrozenSet[str] = frozenset({"comparison", "trend"})
-THINKING_BUDGET:       int   = 1024   # thinking tokens allocated
+THINKING_BUDGET:       int   = 512    # thinking tokens allocated
 THINKING_TEMPERATURE:  float = 1.0
 THINKING_MAX_TOKENS:   int   = 2048   # output tokens (larger to accommodate reasoning)
 

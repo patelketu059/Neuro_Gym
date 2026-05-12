@@ -31,8 +31,32 @@ def run_local(
 
 
     print(f"\n [INFO-DATA] Loading Sessions and Summary...")
-    sessions_df = pd.read_csv(sessions_path)
-    summary_df = pd.read_csv(summary_path)
+    sessions_df = pd.read_csv(sessions_path, low_memory=False)
+    sessions_df = sessions_df[sessions_df['athlete_id'] != 'athlete_id'].reset_index(drop=True)
+
+    _SESSION_NUMERIC = [
+        "opl_row_index", "age", "bodyweight_kg", "squat_peak_kg", "bench_peak_kg",
+        "deadlift_peak_kg", "total_kg", "dots", "week", "day_index",
+        "main_lift_kg", "main_lift_pct_of_peak", "main_lift_rpe",
+        "volume_pct", "main_lift_delta_kg",
+    ]
+    for col in _SESSION_NUMERIC:
+        if col in sessions_df.columns:
+            sessions_df[col] = pd.to_numeric(sessions_df[col], errors="coerce")
+
+    summary_df = pd.read_csv(summary_path, low_memory=False)
+    summary_df = summary_df[summary_df['athlete_id'] != 'athlete_id'].reset_index(drop=True)
+
+    _SUMMARY_NUMERIC = [
+        "competition_1rm_kg", "training_1rm_kg", "dots",
+        "week_1_kg", "week_peak_kg", "week_floor_kg",
+        "peak_week", "floor_week", "total_gain_kg", "peak_pct_of_1rm",
+        "opl_row_index",
+    ]
+    for col in _SUMMARY_NUMERIC:
+        if col in summary_df.columns:
+            summary_df[col] = pd.to_numeric(summary_df[col], errors="coerce")
+
     n_athletes = sessions_df['athlete_id'].nunique()
     print(f"[---] Sessions Shape: {sessions_df.shape}   |   {n_athletes} athletes")
     print(f"[---] Summary Shape: {summary_df.shape}" )

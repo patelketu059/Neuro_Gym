@@ -9,6 +9,14 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+def _load_env() -> None:
+    env_path = ROOT / '.env'
+    if env_path.is_file():
+        from dotenv import load_dotenv
+        load_dotenv(env_path, override=False)
+
+_load_env()
+
 from config.settings import (
     DATA_DIR, 
     OUT_DIR,

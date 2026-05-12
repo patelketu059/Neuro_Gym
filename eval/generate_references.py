@@ -35,16 +35,22 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+# Windows cp1252 console fix — force UTF-8 output so Unicode chars don't crash
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 from config.model_settings import GEMINI_GENERATION_MODEL
 from eval.question_bank import GOLDEN_QUESTIONS
 
-_RETRY_DELAYS = (5.0, 15.0, 45.0)
+# Batch-script retry policy — eval is offline and benefits from waiting out
+# Gemini's per-minute quota windows. Do NOT mirror these into the user-facing
+# chain.py path; latency-sensitive code should fail fast.
+_RETRY_DELAYS = (12.0, 30.0, 60.0)
 
 
 def _is_rate_limited(exc: Exception) -> bool:
@@ -55,6 +61,7 @@ def _is_rate_limited(exc: Exception) -> bool:
 def _suggested_delay(exc: Exception) -> float:
     m = re.search(r'retryDelay["\s:\']+(\d+)s', str(exc))
     return float(m.group(1)) if m else 0.0
+
 
 
 # ── Env loading ───────────────────────────────────────────────────────────────
@@ -80,24 +87,21 @@ def _fetch_athlete_payloads(
     client,
     athlete_ids: list[str],
     max_records: int = 50,
-) -> list[dict]:
-    """Pull session rows and coaching text for the given athletes directly from
-    Qdrant — payload-only, no embedding, no vector search."""
+) -> tuple[list[dict], list[dict]]:
+    """Pull session rows, coaching text, and PDF page metadata for the given athletes.
+
+    Returns (text_payloads, image_page_records).
+    image_page_records is a list of {pdf_path, page_number} dicts sorted by page.
+    """
     from qdrant_client.models import Filter, FieldCondition, MatchAny
 
     payloads: list[dict] = []
+    filt = Filter(
+        must=[FieldCondition(key="athlete_id", match=MatchAny(any=athlete_ids))]
+    ) if athlete_ids else None
 
     for collection in ("gym_tables", "gym_text"):
         try:
-            filt = Filter(
-                must=[
-                    FieldCondition(
-                        key="athlete_id",
-                        match=MatchAny(any=athlete_ids),
-                    )
-                ]
-            ) if athlete_ids else None
-
             results, _ = client.scroll(
                 collection_name=collection,
                 scroll_filter=filt,
@@ -106,14 +110,70 @@ def _fetch_athlete_payloads(
                 with_vectors=False,
             )
             for hit in results:
-                payloads.append({
-                    "collection": collection,
-                    **hit.payload,
-                })
+                payloads.append({"collection": collection, **hit.payload})
         except Exception as e:
             print(f"  [WARN] {collection} scroll failed: {e}")
 
-    return payloads
+    # Fetch gym_images page metadata (no image bytes — just pdf_path + page_number)
+    image_records: list[dict] = []
+    try:
+        img_results, _ = client.scroll(
+            collection_name="gym_images",
+            scroll_filter=filt,
+            limit=50,
+            with_payload=True,
+            with_vectors=False,
+        )
+        seen: set[tuple] = set()
+        for hit in img_results:
+            pdf_path = hit.payload.get("pdf_path", "")
+            page_num = int(hit.payload.get("page_number", 0))
+            key = (pdf_path, page_num)
+            if pdf_path and key not in seen:
+                image_records.append({"pdf_path": pdf_path, "page_number": page_num})
+                seen.add(key)
+        image_records.sort(key=lambda r: (r["pdf_path"], r["page_number"]))
+    except Exception as e:
+        print(f"  [WARN] gym_images scroll failed: {e}")
+
+    return payloads, image_records
+
+
+def _render_pdf_pages(image_records: list[dict], pdf_base_dir: Path) -> list:
+    """Render PDF pages to base64-encoded PNG parts for Gemini.
+
+    Returns a list of google.genai types.Part image objects.
+    """
+    from google.genai import types
+    import base64, io
+
+    parts = []
+    try:
+        import fitz
+    except ImportError:
+        return parts  # PyMuPDF not available
+
+    for rec in image_records:
+        pdf_rel = rec["pdf_path"]
+        page_num = rec["page_number"]
+        pdf_full = pdf_base_dir / Path(pdf_rel).name
+        if not pdf_full.is_file():
+            continue
+        try:
+            doc = fitz.open(str(pdf_full))
+            if page_num >= len(doc):
+                page_num = 0
+            mat = fitz.Matrix(150 / 72, 150 / 72)  # 150 dpi — enough for text
+            pix = doc[page_num].get_pixmap(matrix=mat)
+            buf = io.BytesIO(pix.tobytes("png"))
+            doc.close()
+            b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+            parts.append(types.Part.from_bytes(
+                data=base64.b64decode(b64), mime_type="image/png"
+            ))
+        except Exception as e:
+            print(f"  [WARN] PDF render failed ({pdf_full} p{page_num}): {e}")
+    return parts
 
 
 def _format_payloads(payloads: list[dict]) -> str:
@@ -123,20 +183,20 @@ def _format_payloads(payloads: list[dict]) -> str:
         col = p.get("collection", "")
         aid = p.get("athlete_id", "?")
         if col == "gym_tables":
+            # 800 chars — enough to capture main lifts + all 4 accessory day lines
+            text_snippet = p.get("text", "")[:800]
             lines.append(
                 f"[TABLE] {aid} | week {p.get('week','?')} | "
                 f"{p.get('block_phase','?')} | "
-                f"main_lift={p.get('main_lift_kg','?')}kg "
-                f"RPE={p.get('main_lift_rpe','?')} "
-                f"vol_pct={p.get('volume_pct','?')} | "
                 f"squat_peak={p.get('squat_peak_kg','?')}kg "
                 f"bench_peak={p.get('bench_peak_kg','?')}kg "
                 f"dl_peak={p.get('deadlift_peak_kg','?')}kg | "
                 f"dots={p.get('dots','?')} level={p.get('training_level','?')} | "
-                f"program={p.get('primary_program','?')}"
+                f"program={p.get('primary_program','?')} | "
+                f"{text_snippet}"
             )
         elif col == "gym_text":
-            text = p.get("text", "")[:400]
+            text = p.get("text", "")[:600]
             lines.append(f"[TEXT] {aid} | {text}")
     return "\n".join(lines) if lines else "(no data found)"
 
@@ -147,11 +207,13 @@ _REFERENCE_SYSTEM = """\
 You are generating ground-truth reference answers for a RAG system evaluation.
 
 Rules (non-negotiable):
-1. Cite ONLY information present in the DATA BLOCK below. Never invent numbers.
+1. Cite ONLY information present in the DATA BLOCK or PDF images below. Never invent numbers.
 2. Always include the athlete_id and, for factual claims, the week number.
 3. Be concise — 2-4 sentences max. Evaluators will compare answers against this.
-4. If the data does not contain enough to answer the question, say exactly:
-   "The data does not contain enough information to answer this question."
+4. If the question asks for a specific value that is partially available, give the
+   partial answer (e.g. kg and RPE) and note what is missing (e.g. sets/reps not recorded).
+   Only use "The data does not contain enough information to answer this question."
+   when NO relevant information exists at all.
 5. For level/comparison questions with no specific athletes, summarise patterns
    you observe across the data block.
 6. Do not use markdown or bullet points. Plain prose only.
@@ -170,15 +232,20 @@ def _generate_reference(
     query: str,
     data_text: str,
     gemini,
+    image_parts: list | None = None,
 ) -> str | None:
-    """Return the reference answer string, or None if all retries fail."""
     from google.genai import types
 
-    prompt = _REFERENCE_HUMAN.format(data=data_text, query=query)
+    text_prompt = _REFERENCE_HUMAN.format(data=data_text, query=query)
+    # Build multimodal contents: text block + any PDF page images
+    contents: list = [text_prompt]
+    if image_parts:
+        contents.extend(image_parts)
+
     config = types.GenerateContentConfig(
         system_instruction=_REFERENCE_SYSTEM,
         temperature=0.0,
-        max_output_tokens=300,
+        max_output_tokens=1024,
     )
 
     last_exc: Exception | None = None
@@ -188,21 +255,20 @@ def _generate_reference(
         try:
             resp = gemini.models.generate_content(
                 model=GEMINI_GENERATION_MODEL,
-                contents=prompt,
+                contents=contents,
                 config=config,
             )
             return resp.text.strip()
         except Exception as exc:
+            last_exc = exc
             if _is_rate_limited(exc):
                 wait = _suggested_delay(exc) or fallback_delay or _RETRY_DELAYS[0]
                 print(f"    [RATE LIMIT] waiting {wait:.0f}s (attempt {attempt + 1}/{len(_RETRY_DELAYS) + 1})")
                 time.sleep(wait)
-                last_exc = exc
             else:
-                last_exc = exc
                 break
 
-    print(f"    [ERROR] failed after retries: {last_exc}")
+    print(f"    [ERROR] {last_exc}")
     return None
 
 
@@ -237,6 +303,8 @@ def main() -> int:
         port=int(os.environ.get("QDRANT_PORT", "6333")),
     )
 
+    pdf_base_dir = ROOT / "data" / "pdfs"
+
     # Load existing answers so we can skip already-done ones
     existing: dict[str, str] = {}
     if args.out.is_file() and not args.overwrite:
@@ -262,9 +330,13 @@ def main() -> int:
 
         print(f"  {qid} [{q['intent']}/{q['difficulty']}] fetching data for {athlete_ids or training_levels}…")
 
-        # Fetch raw payloads
+        # Fetch raw payloads + PDF page metadata
+        image_parts: list = []
         if athlete_ids:
-            payloads = _fetch_athlete_payloads(qdrant, athlete_ids, args.max_records)
+            payloads, image_records = _fetch_athlete_payloads(qdrant, athlete_ids, args.max_records)
+            image_parts = _render_pdf_pages(image_records, pdf_base_dir)
+            if image_parts:
+                print(f"    [PDF] {len(image_parts)} page(s) rendered for context")
         elif training_levels:
             # For level-comparison questions: sample a few athletes per level
             from qdrant_client.models import Filter, FieldCondition, MatchAny
@@ -296,7 +368,7 @@ def main() -> int:
             errors += 1
             continue
 
-        ref = _generate_reference(q["query"], data_text, gemini)
+        ref = _generate_reference(q["query"], data_text, gemini, image_parts=image_parts)
         if ref is None:
             print(f"    [SKIP] {qid} — generation failed, will retry on next run")
             errors += 1
@@ -304,7 +376,7 @@ def main() -> int:
             answers[qid] = ref
             generated += 1
             preview = ref[:120].replace("\n", " ")
-            print(f"    → {preview}{'…' if len(ref) > 120 else ''}")
+            print(f"    -> {preview}{'...' if len(ref) > 120 else ''}")
 
         # Write after every question so progress is never lost on interruption
         args.out.parent.mkdir(parents=True, exist_ok=True)

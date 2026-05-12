@@ -1,5 +1,7 @@
 from __future__ import annotations
 import base64
+import functools
+import hashlib
 import io
 import json as _json
 import logging
@@ -8,32 +10,6 @@ from pathlib import Path
 from typing import Generator
 
 log = logging.getLogger(__name__)
-
-_RETRY_DELAYS = (1.0, 3.0, 9.0)
-_RETRYABLE_NAMES = ("ResourceExhausted", "ServiceUnavailable", "QuotaExceeded", "Unavailable")
-
-
-def _is_retryable(exc: Exception) -> bool:
-    name = type(exc).__name__
-    msg  = str(exc)
-    return any(s in name or s in msg for s in _RETRYABLE_NAMES) or "429" in msg or "503" in msg
-
-
-def _generate_with_retry(gemini, model: str, contents, config):
-    """Wrap generate_content with exponential backoff on transient Gemini errors."""
-    last_exc: Exception | None = None
-    for attempt, delay in enumerate([0.0] + list(_RETRY_DELAYS)):
-        if delay:
-            log.warning("[chain] Gemini transient error, retrying in %.0fs (attempt %d)", delay, attempt)
-            time.sleep(delay)
-        try:
-            return gemini.models.generate_content(model=model, contents=contents, config=config)
-        except Exception as exc:
-            if _is_retryable(exc):
-                last_exc = exc
-                continue
-            raise
-    raise last_exc  # type: ignore[misc]
 
 from config.model_settings import GEMINI_GENERATION_MODEL
 from config.rag_config import (
@@ -75,6 +51,7 @@ _INTENT_HINTS = {
 }
 
 
+@functools.lru_cache(maxsize=64)
 def _pdf_page_to_b64(pdf_path: str, page: int = 0, dpi: int = 200) -> str | None:
     try:
         import fitz
@@ -108,6 +85,8 @@ def _image_file_to_b64(image_path: str) -> tuple[str, str] | None:
 
 def _build_content_parts(inputs: dict) -> list:
     """Assemble the multimodal content list for Gemini from the pipeline state dict."""
+    from google.genai import types
+
     query      = inputs["query"]
     context    = inputs["context"]
     memory     = inputs["memory"]
@@ -142,25 +121,44 @@ def _build_content_parts(inputs: dict) -> list:
 
     if pdf_dir and context.get("pdf_paths"):
         sources = context.get("sources", [])
-        for pdf_rel in context["pdf_paths"][:3]:
+
+        # Build pdf_path → sorted list of page numbers from gym_images sources only.
+        # gym_images payloads carry the correct page_number; gym_tables/text default
+        # to 0 which is wrong when the query needs a specific training-block page.
+        image_pages: dict[str, list[int]] = {}
+        for s in sources:
+            if s.get("collection") == "gym_images" and s.get("pdf_path"):
+                pdf_rel = s["pdf_path"]
+                pg = int(s.get("page_number") or 0)
+                image_pages.setdefault(pdf_rel, [])
+                if pg not in image_pages[pdf_rel]:
+                    image_pages[pdf_rel].append(pg)
+
+        total_pages = 0
+        for pdf_rel in context["pdf_paths"][:3]:  # cap at 3 distinct athletes
             full = (
                 str(Path(pdf_dir) / pdf_rel)
                 if not Path(pdf_rel).is_absolute() else pdf_rel
             )
-            page_num = next(
-                (int(s.get("page_number", 0)) for s in sources
-                 if s.get("pdf_path") == pdf_rel),
-                0
-            )
-            b64 = _pdf_page_to_b64(full, page=page_num)
-            if b64:
-                parts.append({"mime_type": "image/png", "data": b64})
+            # Use all gym_images-retrieved pages for this PDF; fall back to page 0
+            pages_to_render = sorted(image_pages.get(pdf_rel, [0]))[:4]
+            for page_num in pages_to_render:
+                if total_pages >= 6:  # hard cap: 6 pages total across all athletes
+                    break
+                b64 = _pdf_page_to_b64(full, page=page_num)
+                if b64:
+                    parts.append(types.Part.from_bytes(
+                        data=base64.b64decode(b64), mime_type="image/png"
+                    ))
+                    total_pages += 1
 
     if image_path and Path(image_path).is_file():
         result = _image_file_to_b64(image_path)
         if result:
             b64_data, mime = result
-            parts.append({"mime_type": mime, "data": b64_data})
+            parts.append(types.Part.from_bytes(
+                data=base64.b64decode(b64_data), mime_type=mime
+            ))
 
     parts.append(f"\nUSER: {query}\nASSISTANT:")
     return parts
@@ -181,8 +179,36 @@ def _build_gen_config(intent: str):
     return types.GenerateContentConfig(**kwargs)
 
 
+# ── Retrieval result cache ────────────────────────────────────────────────────
+# Keyed by (session_id, rewritten_query, config_name, sorted athlete_ids,
+# sorted training_levels). TTL = 5 minutes — enough to cover follow-up
+# questions that re-phrase the same lookup without paying for re-retrieval.
+_RETRIEVAL_CACHE: dict[str, tuple[float, dict]] = {}
+_RETRIEVAL_TTL: float = 300.0  # seconds
+
+
+def _retrieval_cache_key(inputs: dict) -> str:
+    parts = (
+        inputs.get("session_id", ""),
+        inputs.get("retrieval_query", ""),
+        inputs.get("retrieval_config") and inputs["retrieval_config"].name or "",
+        ",".join(sorted(inputs.get("athlete_ids") or [])),
+        ",".join(sorted(inputs.get("training_levels") or [])),
+    )
+    return hashlib.md5("|".join(parts).encode()).hexdigest()
+
+
 def retrieval(inputs: dict) -> dict:
     from pipeline.retrieval.retrieve import retrieve, multi_retrieve
+
+    cache_key = _retrieval_cache_key(inputs)
+    now = time.monotonic()
+    if cache_key in _RETRIEVAL_CACHE:
+        ts, cached_context = _RETRIEVAL_CACHE[cache_key]
+        if now - ts < _RETRIEVAL_TTL:
+            log.debug("[chain] retrieval cache hit")
+            return {**inputs, "context": cached_context}
+        del _RETRIEVAL_CACHE[cache_key]
 
     sub_queries = inputs.get('sub_queries', [])
     hyde_vector = inputs.get('hyde_vector', [])
@@ -221,6 +247,7 @@ def retrieval(inputs: dict) -> dict:
         filters            = retrieval_filters,
         intent             = inputs.get('intent', 'factual'),
     )
+    _RETRIEVAL_CACHE[cache_key] = (time.monotonic(), context)
     return {**inputs, "context": context}
 
 
@@ -234,21 +261,30 @@ def generation(inputs: dict) -> dict:
     t0            = time.perf_counter()
     content_parts = _build_content_parts(inputs)
 
-    response = _generate_with_retry(
-        gemini   = gemini,
+    response = gemini.models.generate_content(
         model    = GEMINI_GENERATION_MODEL,
         contents = content_parts,
         config   = _build_gen_config(intent),
     )
     answer = response.text.strip()
+
+    # ── Token usage ───────────────────────────────────────────────────────────
+    _um             = response.usage_metadata
+    input_tokens    = getattr(_um, "prompt_token_count",     0) or 0
+    output_tokens   = getattr(_um, "candidates_token_count", 0) or 0
+    thinking_tokens = getattr(_um, "thoughts_token_count",   0) or 0
+
     memory.add_user_message(query)
     memory.add_ai_message(answer)
 
     return {
-        "response":      answer,
-        "sources":       context.get("sources", []),
-        "context":       context,
-        "generation_ms": int((time.perf_counter() - t0) * 1000),
+        "response":        answer,
+        "sources":         context.get("sources", []),
+        "context":         context,
+        "generation_ms":   int((time.perf_counter() - t0) * 1000),
+        "input_tokens":    input_tokens,
+        "output_tokens":   output_tokens,
+        "thinking_tokens": thinking_tokens,
     }
 
 
@@ -316,6 +352,10 @@ def run_chain(
         "pdf_paths":       result["context"].get("pdf_paths", []),
         "athlete_ids":     result["context"].get("athlete_ids", []),
         "session_id":      session_id,
+        "input_tokens":    result.get("input_tokens", 0),
+        "output_tokens":   result.get("output_tokens", 0),
+        "thinking_tokens": result.get("thinking_tokens", 0),
+        "text_context":    result["context"].get("text_context", ""),
     }
 
 
@@ -354,29 +394,24 @@ def run_chain_stream(
 
     t0          = time.perf_counter()
     full_answer = ""
+    total_input_tokens    = 0
+    total_output_tokens   = 0
+    total_thinking_tokens = 0
 
-    last_stream_exc: Exception | None = None
-    for attempt, delay in enumerate([0.0] + list(_RETRY_DELAYS)):
-        if delay:
-            log.warning("[chain] Stream transient error, retrying in %.0fs (attempt %d)", delay, attempt)
-            time.sleep(delay)
-        try:
-            for chunk in gemini.models.generate_content_stream(
-                model    = GEMINI_GENERATION_MODEL,
-                contents = content_parts,
-                config   = _build_gen_config(intent),
-            ):
-                if chunk.text:
-                    full_answer += chunk.text
-                    yield _json.dumps(chunk.text)
-            break  # stream completed — exit retry loop
-        except Exception as exc:
-            if _is_retryable(exc):
-                last_stream_exc = exc
-                continue
-            raise
-    else:
-        raise last_stream_exc  # type: ignore[misc]
+    for chunk in gemini.models.generate_content_stream(
+        model    = GEMINI_GENERATION_MODEL,
+        contents = content_parts,
+        config   = _build_gen_config(intent),
+    ):
+        if chunk.text:
+            full_answer += chunk.text
+            yield _json.dumps(chunk.text)
+        # usage_metadata is populated on the final chunk
+        if chunk.usage_metadata:
+            _um = chunk.usage_metadata
+            total_input_tokens    = getattr(_um, "prompt_token_count",     0) or 0
+            total_output_tokens   = getattr(_um, "candidates_token_count", 0) or 0
+            total_thinking_tokens = getattr(_um, "thoughts_token_count",   0) or 0
 
     generation_ms = int((time.perf_counter() - t0) * 1000)
     memory.add_user_message(query)
@@ -396,5 +431,8 @@ def run_chain_stream(
         "hyde_document":   with_context.get("hyde_document", ""),
         "sub_queries":     with_context.get("sub_queries", []),
         "session_id":      session_id,
+        "input_tokens":    total_input_tokens,
+        "output_tokens":   total_output_tokens,
+        "thinking_tokens": total_thinking_tokens,
     }
     yield _json.dumps(meta)

@@ -12,8 +12,8 @@ using LLM-as-judge metrics from RAGAS:
     - context_recall        (only if reference answers are provided)
                             Does the retrieved context cover the ground truth?
 
-The judge LLM is Gemini 2.0 Flash via langchain-google-genai. Embeddings use
-the same Google embeddings model RAGAS recommends.
+The judge LLM is configured via GEMINI_JUDGE_MODEL in config/model_settings.py
+(currently gemini-2.5-flash). Embeddings use the Google embedding-001 model.
 
 Usage (from project root):
 
@@ -63,6 +63,7 @@ from eval.retrieval_eval import (  # noqa: E402
     _init_pipeline_state,
     _load_env_from_dotenv,
 )
+from config.model_settings import GEMINI_JUDGE_MODEL  # noqa: E402
 
 
 _SOURCE_HEADER_RE = re.compile(r"^---\s*SOURCE:.*?---\s*$", re.MULTILINE)
@@ -227,7 +228,7 @@ def _score_with_ragas(rows: list[RagasRow], references: dict[str, str]) -> None:
         )
 
     judge = ChatGoogleGenerativeAI(
-        model="gemini-2.0-flash",
+        model=GEMINI_JUDGE_MODEL,
         google_api_key=api_key,
         temperature=0.0,
     )

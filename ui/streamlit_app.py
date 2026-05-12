@@ -114,12 +114,12 @@ _init_state()
 # PDF helpers
 # -----------------------------------------------------------------------
 
-PDF_ARCHIVE_DIR = ROOT / "data" / "pdfs" / "pdfs_archive"
+PDF_ARCHIVE_DIR = ROOT / "data" / "pdfs"
 
 
 def _resolve_pdf_path(pdf_path: str) -> Path:
     """Backend hands us values like 'pdfs/athlete_00042.pdf' or just
-    'athlete_00042.pdf'. The on-disk layout is data/pdfs/pdfs_archive/<basename>.
+    'athlete_00042.pdf'. The on-disk layout is data/pdfs/<basename>.
     Strip any directory prefix and join under PDF_ARCHIVE_DIR. Absolute paths
     pass through unchanged."""
     p = Path(pdf_path)
