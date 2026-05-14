@@ -1,0 +1,104 @@
+name: Deploy to HuggingFace Spaces
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'pipeline/**'
+      - 'config/**'
+      - 'requirements.txt'
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'ui/streamlit_app.py'
+
+jobs:
+  # ── Backend: FastAPI Docker Space ─────────────────────────────────────────────
+  deploy-backend:
+    name: Backend → k2p/neuro-gym-rag
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sync to HF Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+
+          git clone https://k2p:${HF_TOKEN}@huggingface.co/spaces/k2p/neuro-gym-rag /tmp/hf-backend
+
+          # Sync code directories — exclude compiled artifacts
+          rsync -av --delete \
+            --exclude='__pycache__' --exclude='*.pyc' \
+            app/ /tmp/hf-backend/app/
+
+          rsync -av --delete \
+            --exclude='__pycache__' --exclude='*.pyc' --exclude='.venv' \
+            pipeline/ /tmp/hf-backend/pipeline/
+
+          rsync -av --delete \
+            --exclude='__pycache__' --exclude='*.pyc' \
+            config/ /tmp/hf-backend/config/
+
+          cp requirements.txt Dockerfile .dockerignore /tmp/hf-backend/
+
+          cd /tmp/hf-backend
+          git add .
+          git diff --cached --quiet \
+            && echo "No backend changes — skipping push." \
+            && exit 0
+          git commit -m "ci: deploy backend @ ${GITHUB_SHA::7}"
+          git push
+
+  # ── Frontend: Streamlit Space ──────────────────────────────────────────────────
+  deploy-frontend:
+    name: Frontend → k2p/neuro-gym-ui
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sync to HF Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+
+          git clone https://k2p:${HF_TOKEN}@huggingface.co/spaces/k2p/neuro-gym-ui /tmp/hf-frontend
+
+          # Patch streamlit_app.py for standalone HF Space:
+          #   1. ROOT is one level up (not two) — file lives at space root
+          #   2. FASTAPI_URL defaults to the live backend Space URL
+          python - <<'PYEOF'
+          import re, sys
+
+          with open('ui/streamlit_app.py') as f:
+              src = f.read()
+
+          src = src.replace(
+              'ROOT = Path(__file__).resolve().parent.parent',
+              'ROOT = Path(__file__).resolve().parent',
+          )
+          src = re.sub(
+              r"FASTAPI_URL\s*=\s*os\.environ\.get\('FASTAPI_URL',\s*['\"]http://localhost:8000['\"]\)",
+              'FASTAPI_URL = os.environ.get(\'FASTAPI_URL\', "https://k2p-neuro-gym-rag.hf.space")',
+              src,
+          )
+
+          with open('/tmp/hf-frontend/app.py', 'w') as f:
+              f.write(src)
+
+          print("app.py written")
+          PYEOF
+
+          cd /tmp/hf-frontend
+          git add app.py
+          git diff --cached --quiet \
+            && echo "No frontend changes — skipping push." \
+            && exit 0
+          git commit -m "ci: deploy frontend @ ${GITHUB_SHA::7}"
+          git push
