@@ -139,6 +139,8 @@ app.add_middleware(
 
 from app.routes.chat import router as chat_router
 from app.routes.health_status import router as health_router
+from app.routes.pdf import router as pdf_router
 
 app.include_router(chat_router)
 app.include_router(health_router)
+app.include_router(pdf_router)

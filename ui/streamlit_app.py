@@ -129,6 +129,22 @@ def _resolve_pdf_path(pdf_path: str) -> Path:
 
 
 def _render_pdf_page(pdf_path: str, page: int = 0, dpi: int = 150) -> bytes | None:
+    """Render a PDF page. Tries the backend /pdf/page API first (works on HF
+    Spaces where PDFs aren't stored locally), then falls back to local PyMuPDF
+    rendering for local dev."""
+    # 1. Try backend API (works everywhere)
+    try:
+        r = requests.get(
+            f"{FASTAPI_URL}/pdf/page",
+            params={"path": pdf_path, "page": page, "dpi": dpi},
+            timeout=30,
+        )
+        if r.status_code == 200:
+            return r.content
+    except Exception:
+        pass
+
+    # 2. Local fallback (dev only — data/pdfs/ present)
     try:
         import fitz
         full_path = _resolve_pdf_path(pdf_path)
@@ -492,12 +508,15 @@ with pdf_col:
                 st.session_state.pdf_index = min(n - 1, index + 1)
                 st.rerun()
 
-        pdf_full = _resolve_pdf_path(pdf_paths[index])
         n_pages = 1
         try:
-            import fitz
-            if pdf_full.is_file():
-                n_pages = len(fitz.open(str(pdf_full)))
+            r = requests.get(
+                f"{FASTAPI_URL}/pdf/pages",
+                params={"path": pdf_paths[index]},
+                timeout=10,
+            )
+            if r.status_code == 200:
+                n_pages = r.json().get("pages", 1)
         except Exception:
             pass
 
