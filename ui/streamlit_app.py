@@ -128,14 +128,13 @@ def _resolve_pdf_path(pdf_path: str) -> Path:
     return PDF_ARCHIVE_DIR / p.name
 
 
-def _render_pdf_page(pdf_path: str, page: int = 0, dpi: int = 150) -> bytes | None:
-    """Render a PDF page. Tries the backend /pdf/page API first (works on HF
-    Spaces where PDFs aren't stored locally), then falls back to local PyMuPDF
-    rendering for local dev."""
-    # 1. Try backend API (works everywhere)
+@st.cache_data(ttl=300, show_spinner=False)
+def _render_pdf_page(fastapi_url: str, pdf_path: str, page: int = 0, dpi: int = 150) -> bytes | None:
+    """Render a PDF page — cached 5 min so repeated renders don't hit the API.
+    Tries the backend /pdf/page API first, then falls back to local PyMuPDF."""
     try:
         r = requests.get(
-            f"{FASTAPI_URL}/pdf/page",
+            f"{fastapi_url}/pdf/page",
             params={"path": pdf_path, "page": page, "dpi": dpi},
             timeout=30,
         )
@@ -144,7 +143,7 @@ def _render_pdf_page(pdf_path: str, page: int = 0, dpi: int = 150) -> bytes | No
     except Exception:
         pass
 
-    # 2. Local fallback (dev only — data/pdfs/ present)
+    # Local fallback (dev only — data/pdfs/ present)
     try:
         import fitz
         full_path = _resolve_pdf_path(pdf_path)
@@ -156,6 +155,32 @@ def _render_pdf_page(pdf_path: str, page: int = 0, dpi: int = 150) -> bytes | No
         mat = fitz.Matrix(dpi / 72, dpi / 72)
         pix = doc[page].get_pixmap(matrix=mat)
         return pix.tobytes("png")
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _fetch_page_count(fastapi_url: str, pdf_path: str) -> int:
+    """Return the number of pages in a PDF — cached 5 min."""
+    try:
+        r = requests.get(
+            f"{fastapi_url}/pdf/pages",
+            params={"path": pdf_path},
+            timeout=10,
+        )
+        if r.status_code == 200:
+            return r.json().get("pages", 1)
+    except Exception:
+        pass
+    return 1
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _fetch_health(url: str) -> dict | None:
+    """Health-check the FastAPI backend — cached 30 s to prevent sidebar jitter."""
+    try:
+        h = requests.get(f"{url}/health", timeout=3)
+        return h.json() if h.status_code == 200 else None
     except Exception:
         return None
 
@@ -186,14 +211,6 @@ with st.sidebar:
         st.rerun()
 
     st.divider()
-
-    @st.cache_data(ttl=30, show_spinner=False)
-    def _fetch_health(url: str) -> dict | None:
-        try:
-            h = requests.get(f"{url}/health", timeout=3)
-            return h.json() if h.status_code == 200 else None
-        except Exception:
-            return None
 
     data = _fetch_health(FASTAPI_URL)
     if data is None:
@@ -476,75 +493,64 @@ with chat_col:
         st.rerun()
 
 
-# === PDF column ========================================================
-with pdf_col:
+@st.fragment
+def _pdf_viewer_fragment() -> None:
+    """PDF viewer rendered as a fragment — prev/next/slider reruns only this
+    component, not the full app, eliminating layout jitter on navigation."""
     st.markdown("### PDF Viewer")
 
     pdf_paths = st.session_state.pdf_paths
     if not pdf_paths:
         st.info("Send a query to retrieve athlete PDFs.")
-    else:
-        n = len(pdf_paths)
-        index = st.session_state.pdf_index
+        return
 
-        nav_left, nav_mid, nav_right = st.columns([1, 3, 1])
-        with nav_left:
-            if st.button(
-                "←", disabled=(index == 0), use_container_width=True,
-                key="pdf_prev",
-            ):
-                st.session_state.pdf_index = max(0, index - 1)
-                st.rerun()
+    n     = len(pdf_paths)
+    index = st.session_state.pdf_index
 
-        with nav_mid:
-            st.markdown(
-                f"<p style='text-align:center;margin:0;padding:6px 0'>"
-                f"<b>{pdf_paths[index]}</b><br>"
-                f"<small>PDF {index + 1} of {n}</small></p>",
-                unsafe_allow_html=True,
-            )
+    nav_left, nav_mid, nav_right = st.columns([1, 3, 1])
+    with nav_left:
+        if st.button("←", disabled=(index == 0), use_container_width=True, key="pdf_prev"):
+            st.session_state.pdf_index = max(0, index - 1)
+            st.rerun()
 
-        with nav_right:
-            if st.button(
-                "→", disabled=(index == n - 1), use_container_width=True,
-                key="pdf_next",
-            ):
-                st.session_state.pdf_index = min(n - 1, index + 1)
-                st.rerun()
-
-        n_pages = 1
-        try:
-            r = requests.get(
-                f"{FASTAPI_URL}/pdf/pages",
-                params={"path": pdf_paths[index]},
-                timeout=10,
-            )
-            if r.status_code == 200:
-                n_pages = r.json().get("pages", 1)
-        except Exception:
-            pass
-
-        if n_pages > 1:
-            page_index = st.slider(
-                "Page", 0, n_pages - 1, 0, key=f"page_{index}"
-            )
-        else:
-            page_index = 0
-            st.caption(f"Page 1 of {n_pages}")
-
-        png = _render_pdf_page(pdf_paths[index], page=page_index)
-        if png:
-            st.image(png, use_column_width=True)
-        else:
-            st.warning(f"Could not render {pdf_paths[index]}")
-
-        dot_html = "".join(
-            f"<span style='display:inline-block;width:8px;height:8px;"
-            f"border-radius:50%;background:{'#185FA5' if i == index else '#ccc'};"
-            f"margin:0 3px'></span>"
-            for i in range(n)
-        )
+    with nav_mid:
         st.markdown(
-            f"<p style='text-align:center;margin-top:8px'>{dot_html}</p>",
+            f"<p style='text-align:center;margin:0;padding:6px 0'>"
+            f"<b>{pdf_paths[index]}</b><br>"
+            f"<small>PDF {index + 1} of {n}</small></p>",
             unsafe_allow_html=True,
         )
+
+    with nav_right:
+        if st.button("→", disabled=(index == n - 1), use_container_width=True, key="pdf_next"):
+            st.session_state.pdf_index = min(n - 1, index + 1)
+            st.rerun()
+
+    n_pages   = _fetch_page_count(FASTAPI_URL, pdf_paths[index])
+    if n_pages > 1:
+        page_index = st.slider("Page", 0, n_pages - 1, 0, key=f"page_{index}")
+    else:
+        page_index = 0
+        st.caption(f"Page 1 of {n_pages}")
+
+    png = _render_pdf_page(FASTAPI_URL, pdf_paths[index], page=page_index)
+    if png:
+        st.image(png, use_column_width=True)
+    else:
+        st.warning(f"Could not render {pdf_paths[index]}")
+
+    dot_html = "".join(
+        f"<span style='display:inline-block;width:8px;height:8px;"
+        f"border-radius:50%;background:{'#185FA5' if i == index else '#ccc'};"
+        f"margin:0 3px'></span>"
+        for i in range(n)
+    )
+    st.markdown(
+        f"<p style='text-align:center;margin-top:8px'>{dot_html}</p>",
+        unsafe_allow_html=True,
+    )
+
+
+# === PDF column ========================================================
+with pdf_col:
+    _pdf_viewer_fragment()
