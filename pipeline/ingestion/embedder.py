@@ -135,7 +135,7 @@ def embed_query_api(
     import requests
     import base64
 
-    api_key = api_key or os.environ.get("OPENROUTER_API_KEY")
+    api_key = (api_key or os.environ.get("OPENROUTER_API_KEY", "")).strip() or None
     if not api_key:
         raise EnvironmentError("OPENROUTER_API_KEY not set")
 
@@ -201,7 +201,7 @@ def embed_query_api(
 def _cached_text_embed(text: str, mode: str) -> tuple:
     # Resolve api_key at call time from the environment; not part of cache key
     # to prevent key fragmentation and avoid storing credentials in cache entries.
-    api_key = os.environ.get("OPENROUTER_API_KEY", "")
+    api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
     return tuple(embed_query_api(text, image_path=None, api_key=api_key, mode=mode))
 
 

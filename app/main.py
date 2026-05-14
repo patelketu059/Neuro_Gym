@@ -44,7 +44,7 @@ def _resolve_embed_dir() -> Path:
 
     if not bm_index.exists() or not bm_corpus.exists():
         from huggingface_hub import hf_hub_download
-        hf_token = os.environ.get("HF_TOKEN", "") or None
+        hf_token = (os.environ.get("HF_TOKEN", "") or "").strip() or None
         embed_repo = os.environ.get("EMBED_REPO", "k2p/gym-rag-embeddings")
         print(f"[INFO-APP] - Downloading BM25 artifacts from {embed_repo} …")
         for filename in ("BM_index.pkl", "BM_corpus.json"):
