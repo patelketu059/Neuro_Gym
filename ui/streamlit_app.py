@@ -187,26 +187,30 @@ with st.sidebar:
 
     st.divider()
 
-    try:
-        h = requests.get(f"{FASTAPI_URL}/health", timeout=3)
-        if h.status_code == 200:
-            data   = h.json()
-            status = data.get("status", "unknown")
-            if status == "ok":
-                st.success("API connected")
-            else:
-                st.warning(f"API {status}")
-            for col, count in data.get("qdrant", {}).items():
-                if isinstance(count, int):
-                    st.caption(f"{col}: {count:,} vectors")
-            st.caption(
-                "Gemini: ready" if data.get("gemini_loaded") else "Gemini: not configured"
-            )
-        else:
-            st.error("API error")
-    except Exception:
-        st.error("API unreachable — start FastAPI first")
+    @st.cache_data(ttl=30, show_spinner=False)
+    def _fetch_health(url: str) -> dict | None:
+        try:
+            h = requests.get(f"{url}/health", timeout=3)
+            return h.json() if h.status_code == 200 else None
+        except Exception:
+            return None
+
+    data = _fetch_health(FASTAPI_URL)
+    if data is None:
+        st.error("API unreachable")
         st.caption("uvicorn app.main:app --port 8000")
+    else:
+        status = data.get("status", "unknown")
+        if status == "ok":
+            st.success("API connected")
+        else:
+            st.warning(f"API {status}")
+        for col, count in data.get("qdrant", {}).items():
+            if isinstance(count, int):
+                st.caption(f"{col}: {count:,} vectors")
+        st.caption(
+            "Gemini: ready" if data.get("gemini_loaded") else "Gemini: not configured"
+        )
 
 
 # -----------------------------------------------------------------------
