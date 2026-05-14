@@ -198,6 +198,7 @@ def _score_with_ragas(rows: list[RagasRow], references: dict[str, str]) -> None:
     """Run RAGAS evaluation in-place — populates .faithfulness / .answer_relevancy
     / .context_precision / .context_recall on each row that has valid pipeline
     output."""
+    import warnings
     from ragas import evaluate
     from ragas.metrics.collections import (
         Faithfulness,
@@ -205,27 +206,25 @@ def _score_with_ragas(rows: list[RagasRow], references: dict[str, str]) -> None:
         LLMContextPrecisionWithoutReference,
         LLMContextRecall,
     )
+    from ragas.llms import LangchainLLMWrapper
+    from ragas.embeddings import LangchainEmbeddingsWrapper
+    from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY not set. RAGAS judge LLM cannot be initialised.")
 
-    # Use RAGAS native Google wrappers (no LangchainLLMWrapper / LangchainEmbeddingsWrapper)
-    from ragas.llms import llm_factory
-    from ragas.embeddings import embedding_factory
-    from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
-
-    judge_lc = ChatGoogleGenerativeAI(
-        model=GEMINI_JUDGE_MODEL,
-        google_api_key=api_key,
-        temperature=0.0,
-    )
-    embedder_lc = GoogleGenerativeAIEmbeddings(
-        model="models/text-embedding-004",   # embedding-001 was retired
-        google_api_key=api_key,
-    )
-    evaluator_llm        = llm_factory(judge_lc)
-    evaluator_embeddings = embedding_factory(embedder_lc)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        evaluator_llm = LangchainLLMWrapper(
+            ChatGoogleGenerativeAI(model=GEMINI_JUDGE_MODEL, google_api_key=api_key, temperature=0.0)
+        )
+        evaluator_embeddings = LangchainEmbeddingsWrapper(
+            GoogleGenerativeAIEmbeddings(
+                model="models/text-embedding-004",   # embedding-001 retired
+                google_api_key=api_key,
+            )
+        )
 
     has_references = any(r.reference for r in rows)
     metrics = [
