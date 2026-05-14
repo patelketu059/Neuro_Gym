@@ -23,12 +23,10 @@ class ChatResponse(BaseModel):
 
     retrieval_ms: int
     generation_ms: int
-    # Token usage (Gemini usage_metadata)
     input_tokens:    int = 0
     output_tokens:   int = 0
     thinking_tokens: int = 0
-    # Full assembled context string — used by eval harness for RAGAS scoring
-    text_context: str = ""
+    text_context: str = ""  # full context string for RAGAS eval
 
     config_name: str
     intent: str = 'factual'
@@ -96,19 +94,13 @@ async def chat_stream(
     config_name: str        = Form(default='F — all + BM25'),
     image:       UploadFile = File(default=None),
 ):
-    """Server-Sent Events endpoint.
-
-    Each event is ``data: <json>\\n\\n``.  Non-final events are JSON-encoded
-    text tokens (``"Hello"``).  The final event is a JSON object with
-    ``"__done__": true`` and all metadata (sources, timing, athlete_ids, …).
-    """
+    """SSE stream: JSON text tokens followed by a final ``{"__done__": true}`` metadata event."""
     if len(query) > _MAX_QUERY_CHARS:
         raise HTTPException(status_code=422, detail=f"Query exceeds {_MAX_QUERY_CHARS} characters.")
 
     state = request.app.state
 
-    # Validate and buffer image before entering the sync generator so async
-    # reads and HTTPException can propagate correctly.
+    # Buffer image before entering sync generator so HTTPException can propagate.
     tmp_image_path: str | None = None
     if image and image.filename:
         if image.content_type and image.content_type not in _ALLOWED_MIME:
@@ -138,7 +130,6 @@ async def chat_stream(
             ):
                 yield f"data: {chunk}\n\n"
         except Exception as e:
-            # Include __done__ so the client SSE parser terminates cleanly.
             yield f"data: {json.dumps({'__error__': str(e), '__done__': True})}\n\n"
         finally:
             if tmp_image_path:
@@ -149,7 +140,7 @@ async def chat_stream(
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",   # disable nginx proxy buffering
+            "X-Accel-Buffering": "no",
         },
     )
 

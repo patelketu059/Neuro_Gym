@@ -12,9 +12,7 @@ def _count_tokens(text: str) -> int:
     return len(_get_tokenizer().encode(text))
 
 
-# Fields carried from Qdrant gym_text / BM25 payloads into whichever chunk wins
-# deduplication, so profile cards always render even when gym_tables payloads
-# were indexed before these columns were added to the dataset.
+# Merged into winning chunk so profile cards render even for older gym_tables payloads.
 _PROFILE_FIELDS = ("squat_peak_kg", "bench_peak_kg", "deadlift_peak_kg", "primary_program")
 
 
@@ -23,15 +21,7 @@ def deduplicate_athlete(
         top_k: int = 5,
         top_k_per_athlete: int = 3,
 ) -> list[dict]:
-    """Keep up to *top_k_per_athlete* highest-scoring chunks for each of up to
-    *top_k* distinct athletes.
-
-    Also merges profile fields (squat/bench/deadlift peaks, program) from every
-    result for the same athlete into whichever chunk wins, so profile cards in
-    the UI render correctly even when the winning Qdrant payload pre-dates the
-    addition of those columns.
-    """
-    # athlete_id → [(score, result), ...]
+    """Keep top_k_per_athlete chunks for each of top_k distinct athletes, merging profile fields."""
     buckets:  dict[str, list[tuple[float, dict]]] = {}
     # athlete_id → best non-zero profile field values seen across all results
     profiles: dict[str, dict] = {}
@@ -57,7 +47,6 @@ def deduplicate_athlete(
 
     output: list[dict] = []
     for aid in ordered[:top_k]:
-        # Sort descending by score; keep the top N week-chunks
         top_chunks = sorted(buckets[aid], key=lambda x: x[0], reverse=True)[:top_k_per_athlete]
         patch = profiles[aid]
         for _, r in top_chunks:
@@ -154,7 +143,7 @@ def assemble_context(
 
         text = payload.get("text", "").strip()
         if text and tokens_used < max_tokens:
-            budget_chars = (max_tokens - tokens_used) * 4  # ~4 chars/token
+            budget_chars = (max_tokens - tokens_used) * 4
             block = _passage_block(text, collection, payload, score, budget_chars)
             block_tokens = _count_tokens(block)
             if block_tokens > 0:
@@ -166,8 +155,7 @@ def assemble_context(
             'collection': collection,
             'score': round(score, 4),
             'pdf_path': pdf_path,
-            # Use truthiness (not `is not None`) so 0 / 0.0 / "" are excluded
-            # and the UI shows "?kg" instead of "0.0kg" for genuinely missing lifts.
+            # Excludes 0/0.0/"" so UI shows "?kg" for genuinely missing lifts.
             'payload': {
                 k: payload.get(k)
                 for k in ("training_level", "dots", "squat_peak_kg",

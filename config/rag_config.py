@@ -1,16 +1,7 @@
-"""RAG pipeline tuning constants.
-
-All numeric thresholds, token budgets, and intent-routing tables live here
-so any tuning change is a single-line edit rather than a grep-and-replace
-across multiple pipeline files.
-"""
+"""RAG pipeline tuning constants — single source for all thresholds and budgets."""
 from __future__ import annotations
 from typing import FrozenSet
 
-# ── Context window budgets (tokens) per query intent ─────────────────────────
-# Gemini 2.5 Flash supports 1 M input tokens.  Budgets are tiered by intent
-# so a factual look-up doesn't pay the latency/cost of a 32 K window, while
-# multi-athlete comparisons have room for full 12-week profiles.
 INTENT_CONTEXT_TOKENS: dict[str, int] = {
     "factual":     8_192,   # one athlete, one week
     "trend":      16_384,   # full 12-week block for one athlete
@@ -18,49 +9,34 @@ INTENT_CONTEXT_TOKENS: dict[str, int] = {
     "coaching":   16_384,
     "visual":      8_192,
 }
-DEFAULT_CONTEXT_TOKENS: int = 8_192   # fallback for unrecognised intents
+DEFAULT_CONTEXT_TOKENS: int = 8_192
 
-# ── Retrieval candidate counts ────────────────────────────────────────────────
-TOP_K_HYBRID:             int = 50  # candidates from each dense/BM25 list before RRF
-TOP_K_RERANK:             int = 20  # kept after cross-encoder reranker
-TOP_K_ATHLETES:           int = 5   # unique athletes after deduplication
-TOP_K_PER_ATHLETE_CHUNKS: int = 3   # max week-chunks kept per athlete (allows multi-week context)
+TOP_K_HYBRID:             int = 50
+TOP_K_RERANK:             int = 20
+TOP_K_ATHLETES:           int = 5
+TOP_K_PER_ATHLETE_CHUNKS: int = 3
 
-# ── Reciprocal Rank Fusion ────────────────────────────────────────────────────
-RRF_K: int = 60   # denominator — higher → less aggressive rank bias
+RRF_K: int = 60
 
-# ── BM25 oversampling ratios ──────────────────────────────────────────────────
-# One athlete's 12 weekly records ≈ 0.02 % of the 60 K-document corpus.
-# Multiply fetch_k so all their weeks survive post-filter.
-BM25_OVERSAMPLE_ATHLETE: int = 20   # when filtering by athlete_id
-BM25_OVERSAMPLE_LEVEL:   int = 4    # when filtering by training_level only
+# Oversample BM25 so all of an athlete's 12 weekly records survive post-filter.
+BM25_OVERSAMPLE_ATHLETE: int = 20
+BM25_OVERSAMPLE_LEVEL:   int = 4
 
-# ── HyDE (Hypothetical Document Embeddings) ───────────────────────────────────
-# HyDE adds one Gemini call + one embedding API call per query.  Only run it
-# for open-ended intents where the benefit justifies the latency.
 HYDE_INTENTS: FrozenSet[str] = frozenset({"trend", "coaching"})
 
-# ── Intent-adaptive collection routing ───────────────────────────────────────
-# Sets × reps for main lifts live only in PDFs (gym_images), not in structured
-# tables. Factual queries about specific athletes need PDF page retrieval to
-# answer sets/reps questions. Only "trend" stays text-only (aggregates over time,
-# images add noise without improving week-by-week progression answers).
+# "trend" skips gym_images; images add noise for week-by-week aggregation queries.
 TEXT_ONLY_INTENTS: FrozenSet[str] = frozenset({"trend"})
 
-# ── Gemini generation ─────────────────────────────────────────────────────────
 GENERATION_TEMPERATURE: float = 0.3
 GENERATION_MAX_TOKENS:  int   = 1024
 
-# Thinking mode — Gemini 2.5 Flash extended thinking.
-# Requires temperature = 1.0 when enabled (SDK requirement).
+# Extended thinking requires temperature=1.0 (SDK requirement).
 THINKING_INTENTS: FrozenSet[str] = frozenset({"comparison", "trend"})
-THINKING_BUDGET:       int   = 512    # thinking tokens allocated
+THINKING_BUDGET:       int   = 512
 THINKING_TEMPERATURE:  float = 1.0
-THINKING_MAX_TOKENS:   int   = 2048   # output tokens (larger to accommodate reasoning)
+THINKING_MAX_TOKENS:   int   = 2048
 
-# ── Embedding cache ───────────────────────────────────────────────────────────
-EMBED_CACHE_SIZE: int = 512   # LRU slots; each ≈ 2048 × 4 bytes ≈ 8 KB
+EMBED_CACHE_SIZE: int = 512
 
-# ── Session management ────────────────────────────────────────────────────────
-SESSION_TTL_SECONDS: float = 3600.0          # idle seconds before eviction
+SESSION_TTL_SECONDS: float = 3600.0
 REDIS_URL_DEFAULT:   str   = "redis://localhost:6379"

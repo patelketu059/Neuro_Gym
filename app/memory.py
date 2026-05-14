@@ -44,8 +44,6 @@ class ConversationSummaryBufferMemory:
         self.buffer:  list[Message] = []
         self.summary: str           = ""
 
-    # ── serialization ────────────────────────────────────────────────────────
-
     def to_dict(self) -> dict:
         return {
             "session_id":       self.session_id,
@@ -70,14 +68,12 @@ class ConversationSummaryBufferMemory:
         return obj
 
     def _persist(self) -> None:
-        """Write current state to session store (best-effort, never raises)."""
+        """Persist to session store; best-effort."""
         try:
             from app.session_store import get_store
             get_store().set(self.session_id, self.to_dict())
         except Exception:
             pass
-
-    # ── public API ───────────────────────────────────────────────────────────
 
     def add_user_message(self, content: str) -> None:
         self.buffer.append(Message(role='user', content=content))
@@ -111,8 +107,6 @@ class ConversationSummaryBufferMemory:
 
     def __len__(self) -> int:
         return len(self.buffer)
-
-    # ── internal ─────────────────────────────────────────────────────────────
 
     def _maybe_summarise(self) -> None:
         if self.buffer_tokens() <= self.max_token_budget:
@@ -183,14 +177,6 @@ class ConversationSummaryBufferMemory:
         return _json.dumps({"athletes": {}, "open_questions": [], "theme": theme})
 
 
-# ── Session registry ──────────────────────────────────────────────────────────
-# No in-process cache — every request reads from SessionStore (Redis when
-# available, in-memory dict otherwise). This guarantees cache coherency across
-# multiple uvicorn workers: a turn handled by worker A is immediately visible
-# to worker B on the next request. The Redis round-trip is ~1 ms, dwarfed by
-# the LLM call that always follows.
-
-
 def get_or_create_memory(
     session_id: str,
     gemini=None,
@@ -232,11 +218,7 @@ def clear_memory(session_id: str) -> None:
 
 
 def active_sessions() -> list[str]:
-    """Return list of active session IDs from the persistent store.
-
-    Note: Only available with the in-memory fallback backend. With Redis,
-    enumerate via `redis-cli --scan --pattern 'session:*'` instead.
-    """
+    """Return active session IDs; only works with the in-memory backend."""
     try:
         from app.session_store import get_store
         store = get_store()

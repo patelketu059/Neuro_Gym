@@ -7,10 +7,6 @@ import sys
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-
-# Start with: 
-# uvicorn app.main_day4:app --host 0.0.0.0 --port 8000 --reload
-
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -25,13 +21,7 @@ def _load_env() -> None:
 
 
 def _resolve_embed_dir() -> Path:
-    """Return the path to BM25 + text_vectors artifacts.
-
-    Local dev  : uses hf_pull/k2p/gym-rag-embeddings when BM_index.pkl exists there.
-    HF Spaces  : downloads BM_index.pkl and BM_corpus.json from HF Hub into
-                 /tmp/gym-rag-artifacts on first boot; subsequent boots reuse the
-                 cached files for the lifetime of the container.
-    """
+    """Return path to BM25 artifacts; downloads from HF Hub on first boot if not local."""
     local = ROOT / "hf_pull" / "k2p" / "gym-rag-embeddings"
     if (local / "BM_index.pkl").exists():
         return local
@@ -85,8 +75,6 @@ async def lifespan(app: FastAPI):
     )
     print(f"[INFO-APP] - BM25 Loaded | {len(app.state.corpus)}")
 
-    # Patch corpus with competition lift peaks parsed from gym_text coaching
-    # summaries — build_athlete_peaks returns {} gracefully if text_vectors/ is absent.
     _peaks = build_athlete_peaks(_embed_dir / 'text_vectors')
     _patched = patch_corpus_with_peaks(app.state.corpus, _peaks)
     print(f"[INFO-APP] - Corpus patched with lift peaks | {len(_peaks)} athletes, {_patched} records updated")
@@ -94,7 +82,6 @@ async def lifespan(app: FastAPI):
 
     from google import genai
     api_key = os.environ.get("GEMINI_API_KEY", "")
-    # print(api_key)
     if api_key:
         app.state.gemini = genai.Client(api_key = api_key)
         print(f"[INFO-APP] - Gemini 2.5 Flash connected")
@@ -108,7 +95,7 @@ async def lifespan(app: FastAPI):
     async def _eviction_loop():
         from app.session_store import get_store
         while True:
-            await asyncio.sleep(300)  # every 5 minutes
+            await asyncio.sleep(300)
             try:
                 get_store().evict_stale()
             except Exception:

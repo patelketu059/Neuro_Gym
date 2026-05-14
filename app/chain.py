@@ -84,7 +84,7 @@ def _image_file_to_b64(image_path: str) -> tuple[str, str] | None:
 
 
 def _build_content_parts(inputs: dict) -> list:
-    """Assemble the multimodal content list for Gemini from the pipeline state dict."""
+    """Assemble multimodal content parts for Gemini from pipeline state dict."""
     from google.genai import types
 
     query      = inputs["query"]
@@ -122,9 +122,7 @@ def _build_content_parts(inputs: dict) -> list:
     if pdf_dir and context.get("pdf_paths"):
         sources = context.get("sources", [])
 
-        # Build pdf_path → sorted list of page numbers from gym_images sources only.
-        # gym_images payloads carry the correct page_number; gym_tables/text default
-        # to 0 which is wrong when the query needs a specific training-block page.
+        # Only gym_images payloads carry correct page_number; gym_tables/text default to 0.
         image_pages: dict[str, list[int]] = {}
         for s in sources:
             if s.get("collection") == "gym_images" and s.get("pdf_path"):
@@ -135,7 +133,7 @@ def _build_content_parts(inputs: dict) -> list:
                     image_pages[pdf_rel].append(pg)
 
         total_pages = 0
-        for pdf_rel in context["pdf_paths"][:3]:  # cap at 3 distinct athletes
+        for pdf_rel in context["pdf_paths"][:3]:  # cap: 3 athletes
             full = (
                 str(Path(pdf_dir) / pdf_rel)
                 if not Path(pdf_rel).is_absolute() else pdf_rel
@@ -143,7 +141,7 @@ def _build_content_parts(inputs: dict) -> list:
             # Use all gym_images-retrieved pages for this PDF; fall back to page 0
             pages_to_render = sorted(image_pages.get(pdf_rel, [0]))[:4]
             for page_num in pages_to_render:
-                if total_pages >= 6:  # hard cap: 6 pages total across all athletes
+                if total_pages >= 6:  # hard cap: 6 pages total
                     break
                 b64 = _pdf_page_to_b64(full, page=page_num)
                 if b64:
@@ -165,7 +163,6 @@ def _build_content_parts(inputs: dict) -> list:
 
 
 def _build_gen_config(intent: str):
-    """Return a GenerateContentConfig for the given intent."""
     from google.genai import types
 
     use_thinking = intent in THINKING_INTENTS
@@ -179,12 +176,9 @@ def _build_gen_config(intent: str):
     return types.GenerateContentConfig(**kwargs)
 
 
-# ── Retrieval result cache ────────────────────────────────────────────────────
-# Keyed by (session_id, rewritten_query, config_name, sorted athlete_ids,
-# sorted training_levels). TTL = 5 minutes — enough to cover follow-up
-# questions that re-phrase the same lookup without paying for re-retrieval.
+# Retrieval cache keyed by (session_id, query, config, athlete_ids, levels). TTL = 5 min.
 _RETRIEVAL_CACHE: dict[str, tuple[float, dict]] = {}
-_RETRIEVAL_TTL: float = 300.0  # seconds
+_RETRIEVAL_TTL: float = 300.0
 
 
 def _retrieval_cache_key(inputs: dict) -> str:
@@ -268,7 +262,6 @@ def generation(inputs: dict) -> dict:
     )
     answer = response.text.strip()
 
-    # ── Token usage ───────────────────────────────────────────────────────────
     _um             = response.usage_metadata
     input_tokens    = getattr(_um, "prompt_token_count",     0) or 0
     output_tokens   = getattr(_um, "candidates_token_count", 0) or 0
@@ -372,16 +365,7 @@ def run_chain_stream(
         pdf_dir:          str = '',
         use_hyde:         bool = True,
 ) -> Generator[str, None, None]:
-    """Generator that yields SSE-ready strings.
-
-    Each non-final yield is a JSON-encoded text token: ``'"Hello"'``.
-    The final yield is a JSON-encoded metadata dict with ``"__done__": true``.
-
-    Usage (FastAPI)::
-
-        for chunk in run_chain_stream(...):
-            yield f"data: {chunk}\\n\\n"
-    """
+    """Yield SSE-ready strings: JSON text tokens then a final ``{"__done__": true}`` metadata dict."""
     with_context, cfg = _make_inputs(
         query, session_id, bm25, corpus, client, gemini,
         config_name, query_image_path, reranker_model, pdf_dir, use_hyde,
@@ -406,8 +390,7 @@ def run_chain_stream(
         if chunk.text:
             full_answer += chunk.text
             yield _json.dumps(chunk.text)
-        # usage_metadata is populated on the final chunk
-        if chunk.usage_metadata:
+        if chunk.usage_metadata:  # populated on the final chunk
             _um = chunk.usage_metadata
             total_input_tokens    = getattr(_um, "prompt_token_count",     0) or 0
             total_output_tokens   = getattr(_um, "candidates_token_count", 0) or 0

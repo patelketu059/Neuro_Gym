@@ -7,7 +7,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from config.settings import SESSIONS_PATH, BLOCK_SUMMARY_PATH
 
-from pipeline.ingestion.chunking import build_all_nl_strings #, optimized_build_all_nl_strings
+from pipeline.ingestion.chunking import build_all_nl_strings
 from pipeline.ingestion.bm_index import build_bm_index
 from pipeline.ingestion.collection import (
     get_client,
@@ -62,11 +62,8 @@ def run_local(
     print(f"[---] Summary Shape: {summary_df.shape}" )
 
     corpus_records = build_all_nl_strings(sessions_df)
-    # corpus_records = optimized_build_all_nl_strings(sessions_df)
     build_bm_index(corpus_records)
-
     print(f"[INFO-BM] - Built BM25 Data locally")
-    print(f"Ready to Push to HF")
         
 
 def main():

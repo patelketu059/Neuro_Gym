@@ -11,12 +11,7 @@ _PDF_CACHE_DIR = Path(os.environ.get("PDF_CACHE_DIR", "/tmp/gym-rag-pdfs"))
 
 
 def _get_pdf_path(filename: str) -> Path:
-    """Return a local path to the PDF.
-
-    Checks the local cache first, then downloads the individual file from the
-    HF Hub dataset repo (pdfs/<filename>) on first request. Subsequent requests
-    for the same athlete are served from cache instantly.
-    """
+    """Return local path to PDF, downloading from HF Hub on first request."""
     cached = _PDF_CACHE_DIR / filename
     if cached.is_file():
         return cached
@@ -28,7 +23,6 @@ def _get_pdf_path(filename: str) -> Path:
 
     try:
         from huggingface_hub import hf_hub_download
-        print(f"[PDF] Downloading pdfs/{filename} from {dataset_repo} …")
         hf_hub_download(
             repo_id   = dataset_repo,
             repo_type = "dataset",
@@ -42,7 +36,7 @@ def _get_pdf_path(filename: str) -> Path:
             detail=f"PDF not found in dataset repo: pdfs/{filename} ({exc})",
         )
 
-    # hf_hub_download mirrors the HF path: _PDF_CACHE_DIR/pdfs/<filename>
+    # hf_hub_download mirrors the remote path: _PDF_CACHE_DIR/pdfs/<filename>
     nested = _PDF_CACHE_DIR / "pdfs" / filename
     if nested.is_file():
         return nested
@@ -60,21 +54,9 @@ async def pdf_page(
     page: int = 0,
     dpi: int = 150,
 ):
-    """Render one page of an athlete PDF and return it as image/png.
+    """Render one PDF page and return as image/png."""
+    filename = Path(path).name
 
-    Parameters
-    ----------
-    path : str
-        Value as returned by /chat, e.g. ``pdfs/athlete_00250.pdf``
-        or just ``athlete_00250.pdf``.
-    page : int
-        Zero-based page index (default 0).
-    dpi : int
-        Render DPI (default 150).
-    """
-    filename = Path(path).name   # strip any leading 'pdfs/' prefix
-
-    # Local dev: data/pdfs/<filename> exists on disk
     local = Path(request.app.state.pdf_dir) / "pdfs" / filename
     if not local.is_file():
         local = _get_pdf_path(filename)
@@ -95,7 +77,7 @@ async def pdf_page(
 
 @router.get("/pdf/pages")
 async def pdf_page_count(request: Request, path: str):
-    """Return the total page count for a PDF."""
+    """Return total page count for a PDF."""
     filename = Path(path).name
 
     local = Path(request.app.state.pdf_dir) / "pdfs" / filename

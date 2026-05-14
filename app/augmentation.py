@@ -12,8 +12,6 @@ from langchain_core.prompts import ChatPromptTemplate
 from config.model_settings import GEMINI_AUX_MODEL
 from config.rag_config import HYDE_INTENTS
 
-# ── Regex patterns ─────────────────────────────────────────────────────────────
-
 ATHLETE_ID_RE = re.compile(r'athlete_\d{5}')
 
 PRONOUNS = re.compile(
@@ -25,29 +23,20 @@ INTENT_LABELS = ("factual", "trend", "comparison", "coaching", "visual")
 _LEVEL_VALUES  = ("elite", "advanced", "intermediate", "novice")
 
 
-# ── ID normalisation ───────────────────────────────────────────────────────────
 
 def _parse_any_athlete_ref(value: str) -> str | None:
-    """
-    Parse any athlete ID variant into canonical form.
-    Accepts: 'athlete_00089', 'athlete_89', 'athlete 89', '89' (bare number).
-    Returns canonical string or None if unparseable.
-    """
+    """Normalize any athlete ID variant (e.g. '89', 'athlete_89') to 'athlete_NNNNN'."""
     v = value.strip().lower()
-    # Already canonical
     if ATHLETE_ID_RE.fullmatch(v):
         return v
     # "athlete_89", "athlete 89", "athlete #89" etc.
     m = re.match(r'athlete[\s_#]*(\d{1,5})$', v)
     if m:
         return f"athlete_{int(m.group(1)):05d}"
-    # Bare number
     if v.isdigit() and 1 <= len(v) <= 5:
         return f"athlete_{int(v):05d}"
     return None
 
-
-# ── Pydantic schema for structured output ─────────────────────────────────────
 
 class QueryAnalysis(BaseModel):
     """Structured analysis of a powerlifting coaching query."""
@@ -79,7 +68,6 @@ class QueryAnalysis(BaseModel):
     @field_validator("athlete_ids", mode="before")
     @classmethod
     def normalize_ids(cls, values: list) -> list[str]:
-        """Normalize any athlete ID variant to athlete_NNNNN format."""
         result: list[str] = []
         seen: set[str] = set()
         for raw in values:
@@ -99,8 +87,6 @@ class QueryAnalysis(BaseModel):
     def validate_intent(cls, v: str) -> str:
         return v if v in INTENT_LABELS else "factual"
 
-
-# ── LangChain chain builder ────────────────────────────────────────────────────
 
 _SYSTEM_PROMPT = """\
 You are a query optimizer for a powerlifting training database.
@@ -170,9 +156,6 @@ def _get_chain(gemini_api_key: str):
 
 
 
-
-# ── Combined analysis ──────────────────────────────────────────────────────────
-
 def _call_combined(query: str, history: list[dict], gemini_api_key: str) -> QueryAnalysis:
     summary_block = [m for m in history if m["content"].startswith("[Summary")]
     live_turns    = [m for m in history if not m["content"].startswith("[Summary")]
@@ -196,8 +179,6 @@ def _call_combined(query: str, history: list[dict], gemini_api_key: str) -> Quer
             training_levels=[],
         )
 
-
-# ── HyDE ──────────────────────────────────────────────────────────────────────
 
 _HYDE_PROMPT = """\
 Generate a training record passage (4-6 sentences, approximately 100 words) that \
@@ -241,8 +222,6 @@ def _generate_hyde_document(query: str, gemini_api_key: str) -> str | None:
         return None
 
 
-# ── Entity register (pronoun resolution) ─────────────────────────────────────
-
 class EntityRegister:
 
     def __init__(self) -> None:
@@ -276,8 +255,6 @@ class EntityRegister:
         return PRONOUNS.sub(recent, query)
 
 
-# ── Public entry point ────────────────────────────────────────────────────────
-
 def augment(inputs: dict) -> dict:
     raw_query = inputs["query"]
     memory    = inputs["memory"]
@@ -290,9 +267,6 @@ def augment(inputs: dict) -> dict:
         or os.environ.get("GEMINI_API_KEY", "")
     )
 
-    # Only skip LLM analysis when there is genuinely no API key.
-    # Empty history is fine — the LLM still extracts IDs and intent correctly;
-    # pronoun resolution simply has nothing to resolve on the first turn.
     if not gemini_api_key:
         return {
             **inputs,
@@ -307,31 +281,24 @@ def augment(inputs: dict) -> dict:
             "hyde_document":    "",
         }
 
-    # ── Step 1: pronoun resolution ────────────────────────────────────────────
     register = EntityRegister()
     register.update_from_history(history)
     register.update_from_text(raw_query)
     pronoun_resolved = register.resolve_pronouns(raw_query)
 
-    # ── Step 2: LangChain structured analysis ─────────────────────────────────
-    # Handles intent, query rewrite, athlete ID extraction (including bare
-    # numbers like "42"), and training level detection. Pydantic validators
-    # in QueryAnalysis normalise every ID variant to athlete_NNNNN.
     analysis = _call_combined(pronoun_resolved, history, gemini_api_key)
 
-    # ── Step 3: HyDE for intents that benefit from it ─────────────────────────
     hyde_document: str | None = None
     if use_hyde and analysis.intent in HYDE_INTENTS:
         hyde_document = _generate_hyde_document(pronoun_resolved, gemini_api_key)
 
-    # ── Step 4: sub-query fallback for comparison intent ─────────────────────
+    # Fallback: build sub-queries from resolved IDs when LLM omits them.
     sub_queries = analysis.sub_queries
     if analysis.intent == "comparison" and len(register.all_ids()) >= 2 and not sub_queries:
         sub_queries = [
             f"{aid} {analysis.rewritten_query}" for aid in register.all_ids()[:4]
         ]
 
-    # ── Step 5: embed HyDE document ───────────────────────────────────────────
     hyde_vector: list[float] = []
     if use_hyde and hyde_document and analysis.intent != "visual":
         try:

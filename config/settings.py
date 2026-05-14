@@ -1,25 +1,21 @@
 from pathlib import Path
 import os
 
-# DATA SET PATHS
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT_DIR / "data"
 RAW_DIR = DATA_DIR / "raw"
 OUT_DIR = DATA_DIR / "output"
 CLEANED_DIR = DATA_DIR / 'cleaned'
-PDF_DIR  = DATA_DIR / "pdfs"         
-PDF_CONFIG_PATH   = ROOT_DIR / "config" / "pdf_config.toml"  # PDF generation config
+PDF_DIR  = DATA_DIR / "pdfs"
+PDF_CONFIG_PATH   = ROOT_DIR / "config" / "pdf_config.toml"
 BM_INDEX_PATH = OUT_DIR / 'BM_index.pkl'
 BM_CORPUS_PATH = OUT_DIR / 'BM_corpus.json'
 
 
-
-# RAW SOURCE DATA
 OPL_PATH = RAW_DIR / "openpowerlifting.csv"
 GYM_EX_PATH = RAW_DIR / "programs_detailed_boostcamp_kaggle.csv"
 GYM_PROG_PATH = RAW_DIR / "program_summary.csv"
 
-# DERIVED DATA 
 OPL_CLEANED_PATH = CLEANED_DIR / 'opl_cleaned.csv'
 GYM_COMBINED_PATH = CLEANED_DIR / "combined_600k_dataset.csv"
 SESSIONS_PATH = OUT_DIR / "sessions.csv"
@@ -28,27 +24,21 @@ CHECKPOINT_PATH = DATA_DIR / "checkpoint.json"
 INGEST_CHECKPOINT = DATA_DIR / "ingest_checkpoint.json"
 HF_DOWNLOAD_PATH = ROOT_DIR / 'hf_pull'
 
-
-# GENERATION PARAMETERS
 N_ATHLETES = 5000
 CHECKPOINT_THRESHOLD = 50
 BLOCK_WEEKS = 12
 SESSIONS_PER_WEEK = 4
 ACCESSORIES_PER_SESSION = 4
 
-
-# DOTS THRESHOLDS
 DOTS_THRESHOLDS = {
     "elite":        510,
     "advanced":     410,
     "intermediate": 310,
 }
 
-# MINIMUM MEETS FOR AMPLITUDE CALCLUATION
 MIN_MEETS_FOR_AMPLITUDE = 5
 
-# Maps our training_level to the SET of acceptable level strings in the 600K dataset.
-# "novice" maps to both because the dataset uses both labels interchangeably.
+# "novice" maps to both labels because the 600K dataset uses them interchangeably.
 LEVEL_MAP = {
     "elite":        {"advanced"},
     "advanced":     {"advanced"},
@@ -56,15 +46,13 @@ LEVEL_MAP = {
     "novice":       {"beginner", "novice"}
 }
 
-# 600K GOAL CLASSIFICATION
 STRENGTH_GOAL_KEYWORDS = {
     "strength", "muscle", "hypertrophy", "powerlifting",
     "bulk", "mass", "gain", "power",
-    "weightlifting",  
-    "build",           
+    "weightlifting",
+    "build",
 }
 
-# SESSION STRUCTURE
 SESSION_FOCUS: dict[int, dict] = {
     0: {
         "label": "Lower A",
@@ -124,8 +112,7 @@ PHASE_BOUNDARIES = {
     "deload":          range(12, 13),
 }
 
-# Periodization shape
-# Source: Prilepin (1974) intensity zones; Issurin (2008) block phase structure.
+# Prilepin (1974) intensity zones; Issurin (2008) block phase structure.
 PERIODIZATION_SHAPE: list[float] = [
     0.00, 0.07, 0.14, 0.21,   # accumulation    weeks 1–4
     0.29, 0.37, 0.46, 0.55,   # intensification weeks 5–8
@@ -133,8 +120,6 @@ PERIODIZATION_SHAPE: list[float] = [
     0.20,                      # deload          week 12
 ]
 
-
-# PER LEVEL FLOOR AND CEILING 
 LEVEL_SHAPE_PARAMS = {
     "novice":       {"floor": 0.65, "ceiling": 0.90},
     "intermediate": {"floor": 0.68, "ceiling": 0.93},
@@ -159,7 +144,7 @@ OHP_BENCH_RATIO = {
 }
 
 BARBELL_EQUIPMENT_VALUES: set[str] = {"Full Gym", "Garage Gym"}
-OPL_ROW_INDEX_COL    = "opl_row_index"      
+OPL_ROW_INDEX_COL    = "opl_row_index"
 ACCESSORY_TITLES_COL = "accessory_titles"
 PRIMARY_PROGRAM_COL = "primary_program"
 SECONDARY_PROGRAM_COL = "secondary_program"

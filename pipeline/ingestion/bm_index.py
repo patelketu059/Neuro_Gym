@@ -6,8 +6,6 @@ from pathlib import Path
 from rank_bm25 import BM25Okapi
 from config.settings import DATA_DIR, BM_INDEX_PATH, BM_CORPUS_PATH
 
-# Regex to extract competition lifts from gym_text coaching-summary passages.
-# Matches: "Competition lifts: Squat 162.5kg  Bench 97.5kg  Deadlift 190.0kg"
 _COMP_LIFT_RE = re.compile(
     r'Competition lifts:\s*Squat\s*([\d.]+)kg\s+Bench\s*([\d.]+)kg\s+Deadlift\s*([\d.]+)kg',
     re.IGNORECASE,
@@ -15,16 +13,7 @@ _COMP_LIFT_RE = re.compile(
 
 
 def build_athlete_peaks(gym_text_dir: Path) -> dict[str, dict]:
-    """Parse competition lift peaks from gym_text .npy coaching-summary payloads.
-
-    Iterates every *_text.npy file in *gym_text_dir*, locates the
-    "Competition lifts: Squat Xkg Bench Xkg Deadlift Xkg" line embedded in the
-    coaching-summary text, and returns a dict keyed by athlete_id.
-
-    This is the authoritative source of peak lift data because the coaching
-    summary text was generated from the real competition numbers even when those
-    numbers were not stored as separate payload fields.
-    """
+    """Parse competition lift peaks from *_text.npy coaching-summary payloads."""
     import numpy as np
 
     peaks: dict[str, dict] = {}
@@ -58,10 +47,7 @@ def build_athlete_peaks(gym_text_dir: Path) -> dict[str, dict]:
 
 
 def patch_corpus_with_peaks(corpus: list[dict], peaks: dict[str, dict]) -> int:
-    """Patch BM25 corpus records in-place with competition lift peak data.
-
-    Returns the number of records that were updated.
-    """
+    """Patch corpus records in-place with peak lift data; return update count."""
     updated = 0
     for record in corpus:
         aid = record.get('athlete_id', '')

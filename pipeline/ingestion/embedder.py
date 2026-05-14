@@ -199,8 +199,7 @@ def embed_query_api(
 
 @functools.lru_cache(maxsize=512)
 def _cached_text_embed(text: str, mode: str) -> tuple:
-    # Resolve api_key at call time from the environment; not part of cache key
-    # to prevent key fragmentation and avoid storing credentials in cache entries.
+    # api_key excluded from cache key to prevent key fragmentation
     api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
     return tuple(embed_query_api(text, image_path=None, api_key=api_key, mode=mode))
 

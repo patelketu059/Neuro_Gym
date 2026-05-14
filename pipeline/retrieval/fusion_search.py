@@ -9,8 +9,6 @@ def RRF(
         results_lists: list[list[dict]],
         k: int = 60
 ) -> list[dict]:
-    
-    # Reciprocal rank fusion
     scores: dict[str, float] = {}
     best: dict[str, dict] = {}
 

@@ -103,11 +103,8 @@ def session_to_nl(
 
     lift_order = ['Squat', 'Bench', 'Deadlift', 'OHP']
     for lift in lift_order:
-        # Get lift row
         row = wk_rows[wk_rows['main_lift'] == lift]
-        # Check for empty row
         if row.empty: continue
-        # get first row, extract kg, rpe, delta, pct
         r = row.iloc[0]
         kg = r['main_lift_kg']
         rpe = r['main_lift_rpe']
@@ -115,8 +112,6 @@ def session_to_nl(
         pct = r.get('main_lift_pct_of_peak', None)
 
         delta_str = ""
-
-        # Check if delta exists and not 0
         if pd.notna(delta) and delta != 0:
             sign = "+" if delta > 0 else ""
             delta_str = f" ({sign}{delta:.1f}kg vs prev week)"
@@ -125,11 +120,8 @@ def session_to_nl(
         lines.append(
             f"{lift}: {kg:.1f}kg{delta_str}  |  RPE {rpe:.1f}{pct_str}"
         )
-    # print(lines)
-    # print(wk_rows['day_label'])
     day_order = ['Lower A', 'Upper A', 'Lower B', 'Upper B']
     for day_label in day_order:
-        # get label row
         row = wk_rows[wk_rows['day_label'] == day_label]
         if row.empty: continue
         r = row.iloc[0]
@@ -158,12 +150,7 @@ def session_to_nl(
 
         if acc_parts:
             lines.append(f"Accessories ({day_label}): {' | '.join(acc_parts)}")
-    # print(lines)
     return "\n".join(lines)
-
-
-#######################################################################################################
-
 
 
 def optimized_session_to_nl(
@@ -204,8 +191,6 @@ def optimized_session_to_nl(
         pct = r.get('main_lift_pct_of_peak', None)
 
         delta_str = ""
-
-        # Check if delta exists and not 0
         if delta and delta != 0:
             sign = "+" if delta > 0 else ""
             delta_str = f" ({sign}{delta:.1f}kg vs prev week)"
@@ -246,10 +231,7 @@ def optimized_session_to_nl(
 
         if acc_parts:
             lines.append(f"Accessories ({day_label}): {' | '.join(acc_parts)}")
-    # print(lines)
     return "\n".join(lines)
-
-
 
 
 
@@ -279,7 +261,6 @@ def build_all_nl_strings(
             'deadlift_peak_kg': float(first_row.get('deadlift_peak_kg', 0) or 0),
         }
 
-        # Add per-athlete coaching summary as a searchable BM25 record (week=0)
         squat_rows  = athlete[athlete['main_lift'] == 'Squat'].sort_values('week')
         week1_squat = float(squat_rows.iloc[0]['main_lift_kg']) if not squat_rows.empty else 0.0
         peak_squat  = float(squat_rows['main_lift_kg'].max())   if not squat_rows.empty else 0.0

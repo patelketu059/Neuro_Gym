@@ -1,14 +1,4 @@
-"""Redis-backed session store with transparent in-memory fallback.
-
-If Redis is unavailable at startup the store falls back to an in-memory dict
-with TTL-based eviction — the application boots even when Redis isn't running.
-
-Environment variable:
-    REDIS_URL — connection string (default: redis://localhost:6379)
-
-Redis setup (local dev):
-    docker run -d --name redis -p 6379:6379 redis:7-alpine
-"""
+"""Redis-backed session store with in-memory fallback when Redis is unavailable."""
 from __future__ import annotations
 import json
 import logging
@@ -23,7 +13,6 @@ _TTL = int(SESSION_TTL_SECONDS)
 
 
 class SessionStore:
-    """Unified session persistence — Redis when available, in-memory fallback."""
 
     def __init__(self, redis_url: str = REDIS_URL_DEFAULT) -> None:
         self._redis = None
@@ -46,8 +35,6 @@ class SessionStore:
     @property
     def backend(self) -> str:
         return "redis" if self._redis else "memory"
-
-    # ── CRUD ─────────────────────────────────────────────────────────────────
 
     def get(self, key: str) -> Optional[dict]:
         if self._redis:
@@ -74,14 +61,14 @@ class SessionStore:
             self._mem.pop(key, None)
 
     def touch(self, key: str) -> None:
-        """Reset TTL without rewriting session data."""
+        """Reset TTL without rewriting data."""
         if self._redis:
             self._redis.expire(f"session:{key}", _TTL)
         elif key in self._mem:
             self._mem[key]["ts"] = time.time()
 
     def evict_stale(self) -> None:
-        """Purge expired in-memory sessions. No-op for Redis (TTL is automatic)."""
+        """Purge expired in-memory sessions (no-op for Redis)."""
         if self._redis:
             return
         cutoff = time.time() - SESSION_TTL_SECONDS
@@ -89,8 +76,6 @@ class SessionStore:
         for k in stale:
             del self._mem[k]
 
-
-# ── Module-level singleton ────────────────────────────────────────────────────
 
 _store: Optional[SessionStore] = None
 

@@ -34,9 +34,7 @@ CONFIGS: dict[str, RetrievalConfig] = {
     "H — BM25 only":        RetrievalConfig("H — BM25 only",         [],                              use_bm25=True),
 }
 
-# ASCII slug aliases — preferred for HTTP clients to avoid UTF-8 mangling of the
-# em-dash. Keys here resolve to the same RetrievalConfig as the canonical em-dash
-# entries above. Both forms work; new code should use the slug.
+# ASCII slug aliases for HTTP clients that mangle the em-dash.
 CONFIG_ALIASES: dict[str, str] = {
     "A-images":      "A — images only",
     "B-text":        "B — text only",
@@ -48,17 +46,11 @@ CONFIG_ALIASES: dict[str, str] = {
     "H-bm25":        "H — BM25 only",
 }
 
-DEFAULT_CONFIG = "F — all + BM25"  # em-dash, matches CONFIGS keys
+DEFAULT_CONFIG = "F — all + BM25"
 
 
 def _alpha_key(name: str) -> str:
-    """Reduce a config name to lowercase alphanumeric characters.
-
-    'F — all + BM25', 'F-all-bm25', 'F â€" all + BM25', 'F  all  BM25'
-    all collapse to 'fallbm25'. This makes the lookup robust against
-    em-dash mojibake (Windows-1252, Latin-1, double-UTF-8) and trivial
-    formatting differences without enumerating every corruption pattern.
-    """
+    """Collapse name to lowercase alphanum — robust against em-dash mojibake variants."""
     return "".join(ch for ch in name.lower() if ch.isascii() and ch.isalnum())
 
 
@@ -103,9 +95,7 @@ def multi_retrieve(
     if not text_collections: return []
 
     def _search_one(q: str) -> list[dict]:
-        # Scope filter to only the athlete(s) mentioned in this sub-query.
-        # Without this, every sub-query gets results from all comparison athletes
-        # and RRF scrambles them together before deduplication.
+        # Filter to athletes in this sub-query so RRF doesn't mix comparison athletes.
         query_aids = _ATHLETE_ID_RE.findall(q)
         q_filter = {**(filters or {}), 'athlete_ids': query_aids} if query_aids else filters
 
@@ -135,9 +125,6 @@ def multi_retrieve(
                 print(f"[INFO-Retrieve] - Multi Retreive sub-query failure: {e}")
 
     return results_list
-
-
-# Intent budgets and routing sourced from config.rag_config for single-location tuning.
 
 
 def retrieve(
@@ -201,10 +188,7 @@ def retrieve(
             print(f'[INFO-Retrieve] - Imaged Embed skipped: {e}')
             image_vector = text_vector
 
-    # HyDE vector (passage-mode embedding of a synthesised training-record
-    # passage) lives in document space; text_vector is in query space. When
-    # HyDE is present, prefer it for searching gym_text/gym_tables — that's
-    # the entire point of HyDE.
+    # HyDE vector is in document space; prefer it over query-space text_vector.
     search_vector = hyde_vector if hyde_vector else text_vector
     dense_results: list[list[dict]] = []
 
@@ -244,15 +228,6 @@ def retrieve(
         
     all_lists = dense_results + ([bm25_results])
     fused = RRF(all_lists)[:top_k_hybrid]
-    # fused = fusion_search(
-    #     query = query,
-    #     query_vector = query_vector,
-    #     bm25 = bm25,
-    #     corpus = corpus,
-    #     client = client,
-    #     top_k = top_k_hybrid,
-    #     filters = filters
-    # )
 
     ranked = rerank(
         query = query,
@@ -261,9 +236,6 @@ def retrieve(
         top_k = top_k_rerank,
     )
 
-    # Comparison: cap per-athlete chunks so both athletes get fair representation.
-    # Factual/trend: allow all ranked chunks through for a single athlete so a
-    # specific week is never crowded out by a higher-scoring but less-relevant chunk.
     n_athletes = len((filters or {}).get('athlete_ids', []))
     if intent == 'comparison' and n_athletes >= 2:
         deduped = deduplicate_athlete(
@@ -275,7 +247,7 @@ def retrieve(
         deduped = deduplicate_athlete(
             ranked,
             top_k=top_k_athletes,
-            top_k_per_athlete=top_k_rerank,  # effectively uncapped for single-athlete
+            top_k_per_athlete=top_k_rerank,
         )
 
     context = assemble_context(deduped, max_tokens = max_context_tokens)
