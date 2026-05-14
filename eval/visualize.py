@@ -145,8 +145,12 @@ def _plot_radar(summaries: list[dict], out: Path, dpi: int) -> None:
 def _plot_faithfulness_bar(summaries: list[dict], out: Path, dpi: int) -> None:
     import matplotlib.pyplot as plt
 
-    labels = [_short_label(s["config"]) for s in summaries]
-    values = [s.get("faithfulness") or 0.0 for s in summaries]
+    # Only plot configs that have been RAGAS-evaluated (faithfulness > 0)
+    evaluated = [s for s in summaries if (s.get("faithfulness") or 0.0) > 0]
+    if not evaluated:
+        evaluated = summaries  # fall back to all if none evaluated
+    labels = [_short_label(s["config"]) for s in evaluated]
+    values = [s.get("faithfulness") or 0.0 for s in evaluated]
     colors = _bar_colors(labels)
 
     fig, ax = plt.subplots(figsize=(11, 5))
@@ -195,19 +199,24 @@ def _plot_intent_heatmap(summaries: list[dict], out: Path, dpi: int) -> None:
     import numpy as np
 
     intents = ["factual", "trend", "comparison", "coaching", "visual"]
-    configs = [_short_label(s["config"]) for s in summaries]
+    # Only show configs that have been RAGAS-evaluated
+    evaluated = [s for s in summaries if (s.get("faithfulness") or 0.0) > 0]
+    if not evaluated:
+        evaluated = summaries
+    configs = [_short_label(s["config"]) for s in evaluated]
 
     matrix = []
-    for s in summaries:
+    for s in evaluated:
         row = [
             s.get("by_intent", {}).get(intent, {}).get("faithfulness", 0.0) or 0.0
             for intent in intents
         ]
         matrix.append(row)
 
-    data = np.array(matrix)  # shape: (n_configs, n_intents)
-
-    fig, ax = plt.subplots(figsize=(10, 6))
+    data = np.array(matrix)  # shape: (n_evaluated, n_intents)
+    n_rows = len(evaluated)
+    fig_h = max(3, n_rows * 1.2)
+    fig, ax = plt.subplots(figsize=(10, fig_h))
     im = ax.imshow(data, cmap="RdYlGn", vmin=0.0, vmax=1.0, aspect="auto")
 
     ax.set_xticks(range(len(intents)))
@@ -283,33 +292,37 @@ def _plot_intent_breakdown(summaries: list[dict], out: Path, dpi: int) -> None:
     import numpy as np
 
     intents = ["factual", "trend", "comparison", "coaching", "visual"]
+    # Only show configs that have been RAGAS-evaluated
+    evaluated = [s for s in summaries if (s.get("faithfulness") or 0.0) > 0]
+    if not evaluated:
+        evaluated = summaries
 
     fig, axes = plt.subplots(1, len(intents), figsize=(18, 5), sharey=True)
     fig.suptitle(
-        "Faithfulness & Answer Relevancy by Intent\n(all configs)",
+        "Faithfulness & Answer Relevancy by Intent\n(RAGAS-evaluated configs)",
         fontsize=13, fontweight="bold",
     )
 
     for ax, intent in zip(axes, intents):
-        labels = [_short_label(s["config"]) for s in summaries]
+        labels = [_short_label(s["config"]) for s in evaluated]
         faiths = [
             s.get("by_intent", {}).get(intent, {}).get("faithfulness", 0.0) or 0.0
-            for s in summaries
+            for s in evaluated
         ]
         ars = [
             s.get("by_intent", {}).get(intent, {}).get("answer_relevancy", 0.0) or 0.0
-            for s in summaries
+            for s in evaluated
         ]
 
         x = np.arange(len(labels))
-        w = 0.38
+        w = min(0.38, 0.8 / max(len(labels), 1))
 
-        b1 = ax.bar(x - w / 2, faiths, w, label="Faithfulness", color="#4C72B0", alpha=0.85)
-        b2 = ax.bar(x + w / 2, ars,    w, label="Ans. Relevancy", color="#DD8452", alpha=0.85)
+        ax.bar(x - w / 2, faiths, w, label="Faithfulness",   color="#4C72B0", alpha=0.85)
+        ax.bar(x + w / 2, ars,    w, label="Ans. Relevancy", color="#DD8452", alpha=0.85)
 
         ax.set_title(intent.capitalize(), fontsize=11, fontweight="bold")
         ax.set_xticks(x)
-        ax.set_xticklabels(labels, fontsize=8)
+        ax.set_xticklabels(labels, fontsize=9 if len(labels) <= 4 else 7)
         ax.set_ylim(0, 1.1)
         ax.grid(axis="y", alpha=0.3, linestyle="--")
         ax.spines[["top", "right"]].set_visible(False)
@@ -362,6 +375,51 @@ def _plot_retrieval_bars(summaries: list[dict], out: Path, dpi: int) -> None:
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
+def _overlay_ragas(
+    summaries: list[dict],
+    ragas_path: Path,
+) -> list[dict]:
+    """Merge RAGAS scores from ragas_results_summary.json into server_results summaries.
+
+    For each config present in the RAGAS file, overwrites faithfulness /
+    answer_relevancy / context_precision / context_recall and by_intent
+    faithfulness / answer_relevancy fields in the matching server_results row.
+    All other server_results fields (retrieval metrics, latency, cost) are kept.
+    """
+    if not ragas_path.is_file():
+        return summaries
+    ragas_by_config = {
+        s["config"]: _normalise(s)
+        for s in json.loads(ragas_path.read_text(encoding="utf-8"))
+    }
+    if not ragas_by_config:
+        return summaries
+
+    merged = []
+    for s in summaries:
+        r = ragas_by_config.get(s["config"])
+        if r is None:
+            merged.append(s)
+            continue
+        row = dict(s)
+        # Overwrite RAGAS metric fields
+        for field in ("faithfulness", "answer_relevancy", "context_precision", "context_recall"):
+            if r.get(field) is not None:
+                row[field] = r[field]
+        # Merge by_intent: overwrite faithfulness + answer_relevancy per intent
+        src_bi = r.get("by_intent", {})
+        dst_bi = dict(row.get("by_intent", {}))
+        for intent, vals in src_bi.items():
+            if intent not in dst_bi:
+                dst_bi[intent] = {}
+            dst_bi[intent] = {**dst_bi[intent], **vals}
+        row["by_intent"] = dst_bi
+        merged.append(row)
+    n_overlaid = sum(1 for s in summaries if s["config"] in ragas_by_config)
+    print(f"[INFO] RAGAS overlay applied to {n_overlaid} config(s): {list(ragas_by_config)}")
+    return merged
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -372,6 +430,10 @@ def main() -> int:
     parser.add_argument(
         "--ragas", action="store_true",
         help="Shortcut: load from eval/ragas_results_summary.json",
+    )
+    parser.add_argument(
+        "--overlay-ragas", action="store_true",
+        help="Overlay RAGAS scores from ragas_results_summary.json into server_results.",
     )
     parser.add_argument(
         "--out-dir", type=Path, default=ROOT / "eval" / "plots",
@@ -402,6 +464,10 @@ def main() -> int:
     summaries: list[dict[str, Any]] = json.loads(args.results.read_text(encoding="utf-8"))
     summaries = [_normalise(s) for s in summaries]
     print(f"[INFO] Loaded {len(summaries)} config summary/ies from {args.results}")
+
+    if args.overlay_ragas:
+        ragas_path = ROOT / "eval" / "ragas_results_summary.json"
+        summaries = _overlay_ragas(summaries, ragas_path)
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     print(f"[INFO] Writing plots to {args.out_dir}/\n")

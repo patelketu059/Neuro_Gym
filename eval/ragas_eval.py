@@ -200,31 +200,52 @@ def _score_with_ragas(rows: list[RagasRow], references: dict[str, str]) -> None:
     output."""
     import warnings
     from ragas import evaluate
-    from ragas.metrics.collections import (
-        Faithfulness,
-        ResponseRelevancy,
-        LLMContextPrecisionWithoutReference,
-        LLMContextRecall,
-    )
+    # Use legacy ragas.metrics classes — they accept LangchainLLMWrapper without
+    # requiring liteLLM. Suppress deprecation warnings from ragas internals.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        from ragas.metrics import (  # noqa: PLC0415
+            Faithfulness,
+            ResponseRelevancy,
+            LLMContextPrecisionWithoutReference,
+            ContextRecall,
+        )
     from ragas.llms import LangchainLLMWrapper
-    from ragas.embeddings import LangchainEmbeddingsWrapper
-    from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+    from ragas.embeddings import BaseRagasEmbeddings
+    from langchain_google_genai import ChatGoogleGenerativeAI
 
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY not set. RAGAS judge LLM cannot be initialised.")
+
+    # Thin embedding wrapper using google-genai (v1 API) — avoids the
+    # langchain-google-genai v1beta routing that rejects text-embedding-004.
+    from google import genai as google_genai
+
+    class _GoogleGenAIEmbeddings(BaseRagasEmbeddings):
+        def __init__(self, key: str, model: str = "gemini-embedding-001") -> None:
+            self._client = google_genai.Client(api_key=key)
+            self._model = model
+
+        def embed_query(self, text: str) -> list[float]:
+            r = self._client.models.embed_content(model=self._model, contents=text)
+            return list(r.embeddings[0].values)
+
+        def embed_documents(self, texts: list[str]) -> list[list[float]]:
+            return [self.embed_query(t) for t in texts]
+
+        async def aembed_query(self, text: str) -> list[float]:
+            return self.embed_query(text)
+
+        async def aembed_documents(self, texts: list[str]) -> list[list[float]]:
+            return self.embed_documents(texts)
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
         evaluator_llm = LangchainLLMWrapper(
             ChatGoogleGenerativeAI(model=GEMINI_JUDGE_MODEL, google_api_key=api_key, temperature=0.0)
         )
-        evaluator_embeddings = LangchainEmbeddingsWrapper(
-            GoogleGenerativeAIEmbeddings(
-                model="models/text-embedding-004",   # embedding-001 retired
-                google_api_key=api_key,
-            )
-        )
+        evaluator_embeddings = _GoogleGenAIEmbeddings(api_key)
 
     has_references = any(r.reference for r in rows)
     metrics = [
@@ -233,7 +254,7 @@ def _score_with_ragas(rows: list[RagasRow], references: dict[str, str]) -> None:
         LLMContextPrecisionWithoutReference(llm=evaluator_llm),
     ]
     if has_references:
-        metrics.append(LLMContextRecall(llm=evaluator_llm))
+        metrics.append(ContextRecall(llm=evaluator_llm))
 
     dataset, included_samples = _build_dataset(rows)
     print(
@@ -245,12 +266,14 @@ def _score_with_ragas(rows: list[RagasRow], references: dict[str, str]) -> None:
         print("[WARN-RAGAS] No valid samples — skipping evaluation.")
         return
 
-    eval_result = evaluate(
-        dataset=dataset,
-        metrics=metrics,
-        llm=evaluator_llm,
-        embeddings=evaluator_embeddings,
-    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        eval_result = evaluate(
+            dataset=dataset,
+            metrics=metrics,
+            llm=evaluator_llm,
+            embeddings=evaluator_embeddings,
+        )
 
     # Normalise to a list of dicts so we can map back to rows by index.
     df = eval_result.to_pandas()
