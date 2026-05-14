@@ -199,48 +199,34 @@ def _score_with_ragas(rows: list[RagasRow], references: dict[str, str]) -> None:
     / .context_precision / .context_recall on each row that has valid pipeline
     output."""
     from ragas import evaluate
-    from ragas.embeddings import LangchainEmbeddingsWrapper
-    from ragas.llms import LangchainLLMWrapper
-    from ragas.metrics import (
+    from ragas.metrics.collections import (
         Faithfulness,
         ResponseRelevancy,
         LLMContextPrecisionWithoutReference,
         LLMContextRecall,
     )
 
-    try:
-        from langchain_google_genai import (
-            ChatGoogleGenerativeAI,
-            GoogleGenerativeAIEmbeddings,
-        )
-    except ImportError as e:
-        raise RuntimeError(
-            "RAGAS evaluation needs langchain-google-genai. "
-            "Install with: pip install langchain-google-genai"
-        ) from e
-
-    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get(
-        "GOOGLE_API_KEY"
-    )
+    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
-        raise RuntimeError(
-            "GEMINI_API_KEY not set. RAGAS judge LLM cannot be initialised."
-        )
+        raise RuntimeError("GEMINI_API_KEY not set. RAGAS judge LLM cannot be initialised.")
 
-    judge = ChatGoogleGenerativeAI(
+    # Use RAGAS native Google wrappers (no LangchainLLMWrapper / LangchainEmbeddingsWrapper)
+    from ragas.llms import llm_factory
+    from ragas.embeddings import embedding_factory
+    from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+
+    judge_lc = ChatGoogleGenerativeAI(
         model=GEMINI_JUDGE_MODEL,
         google_api_key=api_key,
         temperature=0.0,
     )
-    embedder = GoogleGenerativeAIEmbeddings(
-        model="models/embedding-001",
+    embedder_lc = GoogleGenerativeAIEmbeddings(
+        model="models/text-embedding-004",   # embedding-001 was retired
         google_api_key=api_key,
     )
+    evaluator_llm        = llm_factory(judge_lc)
+    evaluator_embeddings = embedding_factory(embedder_lc)
 
-    evaluator_llm = LangchainLLMWrapper(judge)
-    evaluator_embeddings = LangchainEmbeddingsWrapper(embedder)
-
-    # Decide metric set — context_recall only if at least one reference
     has_references = any(r.reference for r in rows)
     metrics = [
         Faithfulness(llm=evaluator_llm),
