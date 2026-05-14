@@ -57,9 +57,11 @@ def _push_folder(folder: Path, repo_id: str, token: str, path_in_repo: str = "")
 def _push_pdfs_individual(pdf_dir: Path, repo_id: str, token: str) -> None:
     """Upload each PDF individually to pdfs/<filename> in the dataset repo.
 
-    Individual files allow on-demand per-athlete downloads at inference time —
-    avoiding the need to fetch and extract a large zip archive on every request.
+    Uploads one file at a time with retry logic. Re-running is safe — files
+    already present on HF are skipped so progress is never lost on connection
+    drops (WinError 10053 / timeout).
     """
+    import time
     from huggingface_hub import HfApi
 
     pdfs = sorted(pdf_dir.glob("*.pdf"))
@@ -69,23 +71,60 @@ def _push_pdfs_individual(pdf_dir: Path, repo_id: str, token: str) -> None:
 
     total_mb = sum(p.stat().st_size for p in pdfs) / (2 ** 20)
     print("-" * 60)
-    print(f"  Repo        : {repo_id}")
-    print(f"  Source      : {pdf_dir}")
-    print(f"  Destination : pdfs/")
-    print(f"  Files       : {len(pdfs)}  ({total_mb:.1f} MB)")
+    print(f"  Repo   : {repo_id}")
+    print(f"  Source : {pdf_dir}")
+    print(f"  Files  : {len(pdfs)}  ({total_mb:.1f} MB)")
 
     api = HfApi(token=token)
     api.create_repo(repo_id=repo_id, repo_type='dataset', exist_ok=True, private=True)
 
-    # upload_folder with path_in_repo="pdfs" pushes the folder contents under pdfs/
-    api.upload_folder(
-        folder_path=str(pdf_dir),
-        repo_id=repo_id,
-        repo_type='dataset',
-        path_in_repo='pdfs',
-        commit_message=f"Upload {len(pdfs)} individual PDFs to pdfs/",
-    )
-    print(f"  Done → https://huggingface.co/datasets/{repo_id}/tree/main/pdfs")
+    # Build set of filenames already on HF so we can skip them
+    print("  Checking existing files on HF …")
+    try:
+        existing = {
+            Path(f.rfilename).name
+            for f in api.list_repo_tree(
+                repo_id=repo_id, repo_type='dataset', path_in_repo='pdfs', recursive=False,
+            )
+        }
+    except Exception:
+        existing = set()
+    print(f"  Already uploaded: {len(existing)} / {len(pdfs)}")
+
+    uploaded = skipped = failed = 0
+    for i, pdf in enumerate(pdfs, 1):
+        if pdf.name in existing:
+            skipped += 1
+            continue
+
+        retries = 3
+        for attempt in range(1, retries + 1):
+            try:
+                api.upload_file(
+                    path_or_fileobj=str(pdf),
+                    path_in_repo=f"pdfs/{pdf.name}",
+                    repo_id=repo_id,
+                    repo_type='dataset',
+                    commit_message=f"Add {pdf.name}",
+                )
+                uploaded += 1
+                print(f"  [{i}/{len(pdfs)}] ✓ {pdf.name}")
+                break
+            except Exception as exc:
+                if attempt == retries:
+                    failed += 1
+                    print(f"  [{i}/{len(pdfs)}] ✗ {pdf.name} — FAILED after {retries} attempts: {exc}")
+                else:
+                    wait = 5 * attempt
+                    print(f"  [{i}/{len(pdfs)}] retry {attempt}/{retries} for {pdf.name} (wait {wait}s): {exc}")
+                    time.sleep(wait)
+
+    print("-" * 60)
+    print(f"  Uploaded: {uploaded}  Skipped: {skipped}  Failed: {failed}")
+    if failed:
+        print("  Re-run the script to retry failed files.")
+    else:
+        print(f"  Done → https://huggingface.co/datasets/{repo_id}/tree/main/pdfs")
 
 
 def main() -> None:
