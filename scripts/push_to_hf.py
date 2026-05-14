@@ -54,15 +54,20 @@ def _push_folder(folder: Path, repo_id: str, token: str, path_in_repo: str = "")
     print(f"  Done → https://huggingface.co/datasets/{repo_id}")
 
 
-def _push_pdfs_individual(pdf_dir: Path, repo_id: str, token: str) -> None:
-    """Upload each PDF individually to pdfs/<filename> in the dataset repo.
+def _push_pdfs_batched(pdf_dir: Path, repo_id: str, token: str, batch_size: int = 50) -> None:
+    """Upload PDFs in batches using create_commit (one HTTP call per batch).
 
-    Uploads one file at a time with retry logic. Re-running is safe — files
-    already present on HF are skipped so progress is never lost on connection
-    drops (WinError 10053 / timeout).
+    Much faster than one-at-a-time uploads. Re-running is safe — files already
+    present on HF are skipped, so interrupted runs resume from where they left off.
+
+    Parameters
+    ----------
+    batch_size : int
+        Number of PDFs per commit (default 50 — ~100-200 MB per call).
+        Lower this if you still hit connection drops.
     """
     import time
-    from huggingface_hub import HfApi
+    from huggingface_hub import HfApi, CommitOperationAdd
 
     pdfs = sorted(pdf_dir.glob("*.pdf"))
     if not pdfs:
@@ -71,58 +76,78 @@ def _push_pdfs_individual(pdf_dir: Path, repo_id: str, token: str) -> None:
 
     total_mb = sum(p.stat().st_size for p in pdfs) / (2 ** 20)
     print("-" * 60)
-    print(f"  Repo   : {repo_id}")
-    print(f"  Source : {pdf_dir}")
-    print(f"  Files  : {len(pdfs)}  ({total_mb:.1f} MB)")
+    print(f"  Repo       : {repo_id}")
+    print(f"  Source     : {pdf_dir}")
+    print(f"  Files      : {len(pdfs)}  ({total_mb:.1f} MB)")
+    print(f"  Batch size : {batch_size}")
 
     api = HfApi(token=token)
     api.create_repo(repo_id=repo_id, repo_type='dataset', exist_ok=True, private=True)
 
-    # Build set of filenames already on HF so we can skip them
+    # Check which files are already on HF so we can skip them
     print("  Checking existing files on HF …")
     try:
         existing = {
             Path(f.rfilename).name
             for f in api.list_repo_tree(
-                repo_id=repo_id, repo_type='dataset', path_in_repo='pdfs', recursive=False,
+                repo_id=repo_id, repo_type='dataset',
+                path_in_repo='pdfs', recursive=False,
             )
         }
     except Exception:
         existing = set()
-    print(f"  Already uploaded: {len(existing)} / {len(pdfs)}")
 
-    uploaded = skipped = failed = 0
-    for i, pdf in enumerate(pdfs, 1):
-        if pdf.name in existing:
-            skipped += 1
-            continue
+    pending = [p for p in pdfs if p.name not in existing]
+    print(f"  Already uploaded : {len(existing)}")
+    print(f"  To upload        : {len(pending)}")
+
+    if not pending:
+        print("  Nothing to do.")
+        return
+
+    # Split into batches
+    batches = [pending[i:i + batch_size] for i in range(0, len(pending), batch_size)]
+    uploaded = failed_files = 0
+
+    for b_idx, batch in enumerate(batches, 1):
+        batch_mb = sum(p.stat().st_size for p in batch) / (2 ** 20)
+        print(f"\n  Batch {b_idx}/{len(batches)}  ({len(batch)} files, {batch_mb:.1f} MB) …")
+
+        operations = [
+            CommitOperationAdd(
+                path_in_repo=f"pdfs/{p.name}",
+                path_or_fileobj=str(p),
+            )
+            for p in batch
+        ]
 
         retries = 3
         for attempt in range(1, retries + 1):
             try:
-                api.upload_file(
-                    path_or_fileobj=str(pdf),
-                    path_in_repo=f"pdfs/{pdf.name}",
+                api.create_commit(
                     repo_id=repo_id,
                     repo_type='dataset',
-                    commit_message=f"Add {pdf.name}",
+                    operations=operations,
+                    commit_message=f"Upload PDFs batch {b_idx}/{len(batches)}",
                 )
-                uploaded += 1
-                print(f"  [{i}/{len(pdfs)}] ✓ {pdf.name}")
+                uploaded += len(batch)
+                print(f"  Batch {b_idx} ✓  ({uploaded}/{len(pending)} uploaded so far)")
                 break
             except Exception as exc:
                 if attempt == retries:
-                    failed += 1
-                    print(f"  [{i}/{len(pdfs)}] ✗ {pdf.name} — FAILED after {retries} attempts: {exc}")
+                    failed_files += len(batch)
+                    print(f"  Batch {b_idx} ✗ FAILED after {retries} attempts: {exc}")
+                    print(f"  Files in this batch: {[p.name for p in batch]}")
                 else:
-                    wait = 5 * attempt
-                    print(f"  [{i}/{len(pdfs)}] retry {attempt}/{retries} for {pdf.name} (wait {wait}s): {exc}")
+                    wait = 10 * attempt
+                    print(f"  Batch {b_idx} retry {attempt}/{retries} in {wait}s: {exc}")
                     time.sleep(wait)
 
-    print("-" * 60)
-    print(f"  Uploaded: {uploaded}  Skipped: {skipped}  Failed: {failed}")
-    if failed:
-        print("  Re-run the script to retry failed files.")
+    print("\n" + "-" * 60)
+    print(f"  Uploaded : {uploaded}")
+    print(f"  Failed   : {failed_files}")
+    if failed_files:
+        print("  Re-run the script to retry failed batches.")
     else:
         print(f"  Done → https://huggingface.co/datasets/{repo_id}/tree/main/pdfs")
 
@@ -141,6 +166,10 @@ def main() -> None:
             "pdfs    = push individual PDFs to pdfs/ | "
             "all     = dataset + pdfs"
         ),
+    )
+    parser.add_argument(
+        "--batch-size", type=int, default=50,
+        help="PDFs per commit batch (default 50). Lower if you get connection drops.",
     )
     parser.add_argument('--config', default='config/hf_config.toml')
     args = parser.parse_args()
@@ -163,10 +192,11 @@ def main() -> None:
         )
 
     if args.repo in ('pdfs', 'all'):
-        _push_pdfs_individual(
-            pdf_dir  = PDF_DIR,
-            repo_id  = dataset_repo,
-            token    = token,
+        _push_pdfs_batched(
+            pdf_dir    = PDF_DIR,
+            repo_id    = dataset_repo,
+            token      = token,
+            batch_size = args.batch_size,
         )
 
 
