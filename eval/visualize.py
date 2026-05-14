@@ -32,6 +32,29 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
+# ── Field normaliser ──────────────────────────────────────────────────────────
+# ragas_results_summary.json uses mean_* prefixes; server_results_summary.json
+# uses bare names. Normalise to bare names so all plots work with either file.
+
+def _normalise(s: dict) -> dict:
+    mapping = {
+        "mean_faithfulness":       "faithfulness",
+        "mean_answer_relevancy":   "answer_relevancy",
+        "mean_context_precision":  "context_precision",
+        "mean_context_recall":     "context_recall",
+        "mean_retrieval_ms":       "mean_retrieval_ms",   # same in both
+        "mean_generation_ms":      "mean_generation_ms",  # same in both
+        "n_questions":             "n_questions",
+        "n_errors":                "n_errors",
+    }
+    out = dict(s)
+    for src, dst in mapping.items():
+        if src in s and dst not in s:
+            out[dst] = s[src]
+    # Normalise by_intent: ragas uses bare faithfulness/answer_relevancy already
+    return out
+
+
 # ── Config label helpers ───────────────────────────────────────────────────────
 
 def _short_label(config: str) -> str:
@@ -344,7 +367,11 @@ def main() -> int:
     parser.add_argument(
         "--results", type=Path,
         default=ROOT / "eval" / "server_results" / "server_results_summary.json",
-        help="Path to server_results_summary.json",
+        help="Path to summary JSON (server_results_summary.json or ragas_results_summary.json)",
+    )
+    parser.add_argument(
+        "--ragas", action="store_true",
+        help="Shortcut: load from eval/ragas_results_summary.json",
     )
     parser.add_argument(
         "--out-dir", type=Path, default=ROOT / "eval" / "plots",
@@ -353,6 +380,9 @@ def main() -> int:
     parser.add_argument("--dpi", type=int, default=180,
                         help="Plot resolution (default 180 — good for web)")
     args = parser.parse_args()
+
+    if args.ragas:
+        args.results = ROOT / "eval" / "ragas_results_summary.json"
 
     if not args.results.is_file():
         print(
@@ -370,6 +400,7 @@ def main() -> int:
         return 1
 
     summaries: list[dict[str, Any]] = json.loads(args.results.read_text(encoding="utf-8"))
+    summaries = [_normalise(s) for s in summaries]
     print(f"[INFO] Loaded {len(summaries)} config summary/ies from {args.results}")
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
