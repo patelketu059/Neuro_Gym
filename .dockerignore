@@ -1,0 +1,36 @@
+# Large local data — downloaded at runtime from HF Hub / Qdrant Cloud
+hf_pull/
+data/
+
+# Secrets
+.env
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+.neuro_gym/
+venv/
+.venv/
+
+# Dev / notebooks
+*.ipynb
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.github/
+.claude/
+
+# Eval outputs (large)
+eval/server_results/

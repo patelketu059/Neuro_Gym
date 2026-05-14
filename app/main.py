@@ -23,21 +23,62 @@ def _load_env() -> None:
     from dotenv import load_dotenv
     load_dotenv(env_path, override=False)
 
+
+def _resolve_embed_dir() -> Path:
+    """Return the path to BM25 + text_vectors artifacts.
+
+    Local dev  : uses hf_pull/k2p/gym-rag-embeddings when BM_index.pkl exists there.
+    HF Spaces  : downloads BM_index.pkl and BM_corpus.json from HF Hub into
+                 /tmp/gym-rag-artifacts on first boot; subsequent boots reuse the
+                 cached files for the lifetime of the container.
+    """
+    local = ROOT / "hf_pull" / "k2p" / "gym-rag-embeddings"
+    if (local / "BM_index.pkl").exists():
+        return local
+
+    artifact_dir = Path(os.environ.get("ARTIFACT_DIR", "/tmp/gym-rag-artifacts"))
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+
+    bm_index  = artifact_dir / "BM_index.pkl"
+    bm_corpus = artifact_dir / "BM_corpus.json"
+
+    if not bm_index.exists() or not bm_corpus.exists():
+        from huggingface_hub import hf_hub_download
+        hf_token = os.environ.get("HF_TOKEN", "") or None
+        embed_repo = os.environ.get("EMBED_REPO", "k2p/gym-rag-embeddings")
+        print(f"[INFO-APP] - Downloading BM25 artifacts from {embed_repo} …")
+        for filename in ("BM_index.pkl", "BM_corpus.json"):
+            hf_hub_download(
+                repo_id   = embed_repo,
+                repo_type = "dataset",
+                filename  = filename,
+                local_dir = str(artifact_dir),
+                token     = hf_token,
+            )
+        print(f"[INFO-APP] - BM25 artifacts ready at {artifact_dir}")
+
+    return artifact_dir
+
     
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _load_env()
 
     from pipeline.ingestion.collection import get_client
+    _qdrant_url     = os.environ.get("QDRANT_URL", "")
+    _qdrant_api_key = os.environ.get("QDRANT_API_KEY", "")
     app.state.qdrant = get_client(
-        host = os.environ.get("QDRANT_HOST", "localhost"),
-        port = int(os.environ.get("QDRANT_PORT", "6333"))
+        host    = os.environ.get("QDRANT_HOST", "localhost"),
+        port    = int(os.environ.get("QDRANT_PORT", "6333")),
+        url     = _qdrant_url     or None,
+        api_key = _qdrant_api_key or None,
     )
-    print(f"[INFO-APP] - Qdrant Instantiated")
+    _qdrant_target = _qdrant_url or f"{os.environ.get('QDRANT_HOST','localhost')}:{os.environ.get('QDRANT_PORT','6333')}"
+    print(f"[INFO-APP] - Qdrant connected → {_qdrant_target}")
 
 
     from pipeline.ingestion.bm_index import load_bm_index, build_athlete_peaks, patch_corpus_with_peaks
-    _embed_dir = ROOT / 'hf_pull' / 'k2p' / 'gym-rag-embeddings'
+    _embed_dir = _resolve_embed_dir()
     app.state.bm25, app.state.corpus = load_bm_index(
         index_path  = _embed_dir / 'BM_index.pkl',
         corpus_path = _embed_dir / 'BM_corpus.json',
@@ -45,8 +86,7 @@ async def lifespan(app: FastAPI):
     print(f"[INFO-APP] - BM25 Loaded | {len(app.state.corpus)}")
 
     # Patch corpus with competition lift peaks parsed from gym_text coaching
-    # summaries — the BM_corpus.json was generated before squat/bench/deadlift
-    # peak fields were added to the dataset schema.
+    # summaries — build_athlete_peaks returns {} gracefully if text_vectors/ is absent.
     _peaks = build_athlete_peaks(_embed_dir / 'text_vectors')
     _patched = patch_corpus_with_peaks(app.state.corpus, _peaks)
     print(f"[INFO-APP] - Corpus patched with lift peaks | {len(_peaks)} athletes, {_patched} records updated")

@@ -16,14 +16,27 @@ COLLECTIONS = [
 def get_client(
         host: str = 'localhost',
         port: int = 6333,
-        timeout: int = 300
+        timeout: int = 300,
+        url: str | None = None,
+        api_key: str | None = None,
 ) -> QdrantClient:
-    client = QdrantClient(host=host, port=port, timeout=timeout)
+    """Return a connected QdrantClient.
+
+    When *url* and *api_key* are supplied (Qdrant Cloud), they take priority
+    over *host*/*port* (local / self-hosted).  Either pair is accepted so the
+    same function works in local dev and production without code changes.
+    """
+    if url and api_key:
+        client = QdrantClient(url=url, api_key=api_key, timeout=timeout)
+        label = url
+    else:
+        client = QdrantClient(host=host, port=port, timeout=timeout)
+        label = f"{host}:{port}"
     try:
         client.get_collections()
     except Exception as exc:
         raise ConnectionError(
-            f"Cannot connect to Qdrant at {host}:{port}. "
+            f"Cannot connect to Qdrant at {label}. "
         ) from exc
     return client
 

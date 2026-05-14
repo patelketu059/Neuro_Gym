@@ -1,0 +1,37 @@
+# ── Web framework ─────────────────────────────────────────────────────────────
+fastapi==0.136.1
+uvicorn[standard]==0.46.0
+python-multipart==0.0.20
+
+# ── Vector database ───────────────────────────────────────────────────────────
+qdrant-client==1.17.1
+
+# ── Google Gemini ─────────────────────────────────────────────────────────────
+google-genai==1.73.1
+
+# ── LangChain (query analysis + HyDE) ────────────────────────────────────────
+langchain-core==1.3.3
+langchain-google-genai==4.2.2
+
+# ── Sparse retrieval ──────────────────────────────────────────────────────────
+rank-bm25==0.2.2
+
+# ── Token counting ────────────────────────────────────────────────────────────
+tiktoken==0.12.0
+
+# ── PDF rendering (multimodal chain) ─────────────────────────────────────────
+PyMuPDF==1.27.2.2
+pillow==12.2.0
+
+# ── Data ─────────────────────────────────────────────────────────────────────
+numpy==2.4.4
+pandas==3.0.2
+
+# ── HuggingFace Hub (artifact download at startup) ───────────────────────────
+huggingface-hub==1.10.1
+
+# ── Utilities ────────────────────────────────────────────────────────────────
+requests==2.33.1
+pydantic==2.13.0
+python-dotenv==1.2.2
+tqdm==4.67.3
