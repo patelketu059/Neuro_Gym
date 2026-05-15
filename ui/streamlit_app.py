@@ -102,6 +102,7 @@ def _init_state():
         "prefill_query":  "",
         "uploaded_image": None,
         "pending_prompt": None,
+        "use_streaming":  True,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -228,6 +229,62 @@ with st.sidebar:
         st.caption(
             "Gemini: ready" if data.get("gemini_loaded") else "Gemini: not configured"
         )
+        st.caption(f"BM25: {'loaded' if data.get('bm25_loaded') else 'not loaded'}")
+
+    st.divider()
+    st.session_state.use_streaming = st.checkbox(
+        "Stream response",
+        value=st.session_state.use_streaming,
+        help=(
+            "Enabled: tokens appear as they arrive (SSE streaming). "
+            "Disable if responses are blank or timing shows 0 ms."
+        ),
+    )
+
+
+# -----------------------------------------------------------------------
+# Non-streaming fallback helper
+# -----------------------------------------------------------------------
+
+def _call_chat_blocking(prompt: str, uploaded_image, metadata_sink: list) -> str:
+    """Call the non-streaming /chat endpoint — guaranteed to return a complete
+    response with timing metadata even if SSE streaming is unreliable."""
+    import json as _json
+
+    data = {
+        "query":       prompt,
+        "session_id":  st.session_state.session_id,
+        "config_name": st.session_state.config_name,
+    }
+    files = {}
+    if uploaded_image:
+        files["image"] = (
+            uploaded_image.name,
+            uploaded_image.getvalue(),
+            uploaded_image.type,
+        )
+    try:
+        resp = requests.post(
+            f"{FASTAPI_URL}/chat",
+            data    = data,
+            files   = files or None,
+            timeout = 180,
+        )
+        resp.raise_for_status()
+        result = resp.json()
+        metadata_sink.append({
+            "__done__":      True,
+            "retrieval_ms":  result.get("retrieval_ms", 0),
+            "generation_ms": result.get("generation_ms", 0),
+            "config_name":   result.get("config_name", st.session_state.config_name),
+            "sources":       result.get("sources", []),
+            "pdf_paths":     result.get("pdf_paths", []),
+            "athlete_ids":   result.get("athlete_ids", []),
+            "intent":        result.get("intent", "factual"),
+        })
+        return result.get("response", "")
+    except Exception as exc:
+        return f"⚠️ Error calling API: {exc}"
 
 
 # -----------------------------------------------------------------------
@@ -340,11 +397,17 @@ def _stream_chat_api(prompt: str, uploaded_image, metadata_sink: list):
                     yield payload
                     continue
 
-                if isinstance(parsed, dict) and parsed.get("__done__"):
+                if isinstance(parsed, dict) and parsed.get("__ping__"):
+                    # Server heartbeat — ignore, just keep reading.
+                    continue
+                if isinstance(parsed, dict) and parsed.get("__error__"):
+                    # Show the error text, then capture for metadata so
+                    # the caller can still inspect it, then stop.
+                    yield f"\n\n⚠️ Backend error: {parsed['__error__']}"
                     metadata_sink.append(parsed)
                     return
-                if isinstance(parsed, dict) and parsed.get("__error__"):
-                    yield f"\n\n⚠️ {parsed['__error__']}"
+                if isinstance(parsed, dict) and parsed.get("__done__"):
+                    metadata_sink.append(parsed)
                     return
                 if isinstance(parsed, str):
                     yield parsed
@@ -466,13 +529,31 @@ with chat_col:
 
             with st.chat_message("assistant"):
                 metadata_sink: list = []
-                full_text = st.write_stream(
-                    _stream_chat_api(
-                        prompt,
-                        st.session_state.get("uploaded_image"),
-                        metadata_sink,
+                uploaded = st.session_state.get("uploaded_image")
+
+                if st.session_state.use_streaming:
+                    # --- Streaming path (SSE) ---
+                    full_text = st.write_stream(
+                        _stream_chat_api(prompt, uploaded, metadata_sink)
                     )
-                )
+                    # Fallback: if streaming returned nothing and captured no
+                    # metadata, it likely hit a proxy/buffering issue — retry
+                    # with the non-streaming endpoint automatically.
+                    if not full_text and not metadata_sink:
+                        with st.spinner("Streaming unavailable — retrying…"):
+                            full_text = _call_chat_blocking(
+                                prompt, uploaded, metadata_sink
+                            )
+                        if full_text:
+                            st.markdown(full_text)
+                else:
+                    # --- Non-streaming path (blocking /chat endpoint) ---
+                    with st.spinner("Thinking…"):
+                        full_text = _call_chat_blocking(
+                            prompt, uploaded, metadata_sink
+                        )
+                    st.markdown(full_text)
+
                 meta = metadata_sink[0] if metadata_sink else {}
                 assistant_msg = {
                     "role":          "assistant",

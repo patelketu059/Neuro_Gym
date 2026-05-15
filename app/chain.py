@@ -365,7 +365,15 @@ def run_chain_stream(
         pdf_dir:          str = '',
         use_hyde:         bool = True,
 ) -> Generator[str, None, None]:
-    """Yield SSE-ready strings: JSON text tokens then a final ``{"__done__": true}`` metadata dict."""
+    """Yield SSE-ready strings: JSON text tokens then a final ``{"__done__": true}`` metadata dict.
+
+    A ``{"__ping__": true}`` heartbeat is emitted immediately so the client
+    knows the connection is alive while retrieval (5–10 s) runs.
+    """
+    # Heartbeat: keeps the SSE connection alive through reverse-proxy idle
+    # timeouts while augmentation + retrieval run synchronously below.
+    yield _json.dumps({"__ping__": True})
+
     with_context, cfg = _make_inputs(
         query, session_id, bm25, corpus, client, gemini,
         config_name, query_image_path, reranker_model, pdf_dir, use_hyde,
