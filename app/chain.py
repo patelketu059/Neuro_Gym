@@ -11,11 +11,26 @@ from typing import Generator
 
 log = logging.getLogger(__name__)
 
-from config.model_settings import GEMINI_GENERATION_MODEL
+from config.model_settings import GEMINI_GENERATION_MODEL, GEMINI_FALLBACK_MODEL
 from config.rag_config import (
     GENERATION_TEMPERATURE, GENERATION_MAX_TOKENS,
     THINKING_INTENTS, THINKING_BUDGET, THINKING_TEMPERATURE, THINKING_MAX_TOKENS,
 )
+
+# Models that support extended thinking via ThinkingConfig (Gemini 2.5+).
+_THINKING_CAPABLE = {"gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-flash-lite"}
+
+
+def _is_rate_limit(exc: Exception) -> bool:
+    """Return True when an exception signals a transient API quota / rate-limit."""
+    msg = str(exc)
+    return (
+        "429" in msg
+        or "RESOURCE_EXHAUSTED" in msg
+        or "rate_limit" in msg.lower()
+        or "rate limit" in msg.lower()
+        or "quota" in msg.lower()
+    )
 
 SYSTEM_PROMPT = """You are an expert powerlifting coach with access to a structured \
 database of athlete training records.
@@ -162,10 +177,12 @@ def _build_content_parts(inputs: dict) -> list:
     return parts
 
 
-def _build_gen_config(intent: str):
+def _build_gen_config(intent: str, model: str = GEMINI_GENERATION_MODEL):
     from google.genai import types
 
-    use_thinking = intent in THINKING_INTENTS
+    # Extended thinking is only supported on Gemini 2.5+ models.
+    supports_thinking = model in _THINKING_CAPABLE
+    use_thinking = supports_thinking and intent in THINKING_INTENTS
     kwargs: dict = dict(
         system_instruction = SYSTEM_PROMPT,
         temperature        = THINKING_TEMPERATURE if use_thinking else GENERATION_TEMPERATURE,
@@ -174,6 +191,13 @@ def _build_gen_config(intent: str):
     if use_thinking:
         kwargs['thinking_config'] = types.ThinkingConfig(thinking_budget=THINKING_BUDGET)
     return types.GenerateContentConfig(**kwargs)
+
+
+def _model_order() -> list[str]:
+    """Return [primary, fallback] deduplicated so we don't retry with the same model."""
+    if GEMINI_GENERATION_MODEL == GEMINI_FALLBACK_MODEL:
+        return [GEMINI_GENERATION_MODEL]
+    return [GEMINI_GENERATION_MODEL, GEMINI_FALLBACK_MODEL]
 
 
 # Retrieval cache keyed by (session_id, query, config, athlete_ids, levels). TTL = 5 min.
@@ -255,11 +279,20 @@ def generation(inputs: dict) -> dict:
     t0            = time.perf_counter()
     content_parts = _build_content_parts(inputs)
 
-    response = gemini.models.generate_content(
-        model    = GEMINI_GENERATION_MODEL,
-        contents = content_parts,
-        config   = _build_gen_config(intent),
-    )
+    response = None
+    for model in _model_order():
+        try:
+            response = gemini.models.generate_content(
+                model    = model,
+                contents = content_parts,
+                config   = _build_gen_config(intent, model),
+            )
+            break
+        except Exception as exc:
+            if model == GEMINI_FALLBACK_MODEL or not _is_rate_limit(exc):
+                raise
+            log.warning("[chain] %s rate-limited — retrying with %s", model, GEMINI_FALLBACK_MODEL)
+
     answer = response.text.strip()
 
     _um             = response.usage_metadata
@@ -390,19 +423,27 @@ def run_chain_stream(
     total_output_tokens   = 0
     total_thinking_tokens = 0
 
-    for chunk in gemini.models.generate_content_stream(
-        model    = GEMINI_GENERATION_MODEL,
-        contents = content_parts,
-        config   = _build_gen_config(intent),
-    ):
-        if chunk.text:
-            full_answer += chunk.text
-            yield _json.dumps(chunk.text)
-        if chunk.usage_metadata:  # populated on the final chunk
-            _um = chunk.usage_metadata
-            total_input_tokens    = getattr(_um, "prompt_token_count",     0) or 0
-            total_output_tokens   = getattr(_um, "candidates_token_count", 0) or 0
-            total_thinking_tokens = getattr(_um, "thoughts_token_count",   0) or 0
+    for model in _model_order():
+        try:
+            for chunk in gemini.models.generate_content_stream(
+                model    = model,
+                contents = content_parts,
+                config   = _build_gen_config(intent, model),
+            ):
+                if chunk.text:
+                    full_answer += chunk.text
+                    yield _json.dumps(chunk.text)
+                if chunk.usage_metadata:  # populated on the final chunk
+                    _um = chunk.usage_metadata
+                    total_input_tokens    = getattr(_um, "prompt_token_count",     0) or 0
+                    total_output_tokens   = getattr(_um, "candidates_token_count", 0) or 0
+                    total_thinking_tokens = getattr(_um, "thoughts_token_count",   0) or 0
+            break  # stream completed successfully
+        except Exception as exc:
+            if model == GEMINI_FALLBACK_MODEL or not _is_rate_limit(exc):
+                raise
+            log.warning("[chain] %s rate-limited — retrying stream with %s", model, GEMINI_FALLBACK_MODEL)
+            full_answer = ""  # discard any partial tokens already yielded
 
     generation_ms = int((time.perf_counter() - t0) * 1000)
     memory.add_user_message(query)
