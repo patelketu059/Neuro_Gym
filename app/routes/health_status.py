@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 
 router = APIRouter()
 
-@router.get('/health')
+@router.api_route('/health', methods=['GET', 'HEAD'])
 async def health(request: Request):
     
     state = request.app.state
