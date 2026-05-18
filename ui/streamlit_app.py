@@ -87,6 +87,27 @@ st.set_page_config(
     layout     = "wide",
 )
 
+# -----------------------------------------------------------------------
+# Global CSS
+# -----------------------------------------------------------------------
+st.markdown("""
+<style>
+/* Pin PDF image to a fixed height so the vertical layout never shifts
+   when the sidebar opens/closes (which resizes columns and would otherwise
+   change the image height as it scales to the new container width). */
+[data-testid="stImage"] img {
+    max-height: 500px;
+    object-fit: contain;
+    width: 100%;
+}
+
+/* Smooth column resize so sidebar toggle feels less jarring. */
+[data-testid="column"] {
+    transition: width 0.15s ease;
+}
+</style>
+""", unsafe_allow_html=True)
+
 
 # -----------------------------------------------------------------------
 # Session state
