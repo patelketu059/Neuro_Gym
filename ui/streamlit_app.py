@@ -517,6 +517,10 @@ with chat_col:
         else:
             for msg in st.session_state.messages:
                 with st.chat_message(msg["role"]):
+                    # Show image thumbnail above the text for user messages
+                    if msg["role"] == "user" and msg.get("image_bytes"):
+                        st.image(msg["image_bytes"], width=120,
+                                 caption=msg.get("image_name", ""))
                     st.markdown(msg["content"])
                     if msg["role"] == "assistant":
                         _render_assistant_payload(msg)
@@ -563,23 +567,38 @@ with chat_col:
 
     # --- New-prompt processing -----------------------------------------
     if prompt:
+        # Capture image NOW before any state changes so it's available
+        # throughout this handler and persisted with the message.
+        uploaded    = st.session_state.get("uploaded_image")
+        image_bytes = uploaded.getvalue() if uploaded else None
+        image_name  = uploaded.name       if uploaded else None
+
+        # Auto-clear attachment immediately — it should not carry over
+        # to the next message.
+        st.session_state.uploaded_image = None
+        st.session_state.uploader_key  += 1
+
         # Clear stale PDFs the moment a new query is fired so the right-hand
         # column blanks while the spinner runs rather than displaying the
         # previous query's results.
         st.session_state.pdf_paths = []
         st.session_state.pdf_index = 0
 
-        # Append the user's message immediately so it appears in the
-        # history pane while we wait on the API call below.
-        st.session_state.messages.append({"role": "user", "content": prompt})
+        # Build user message — store image bytes so history renders the thumbnail.
+        user_msg: dict = {"role": "user", "content": prompt}
+        if image_bytes:
+            user_msg["image_bytes"] = image_bytes
+            user_msg["image_name"]  = image_name
+        st.session_state.messages.append(user_msg)
 
         with msg_area:
             with st.chat_message("user"):
+                if image_bytes:
+                    st.image(image_bytes, width=120, caption=image_name or "")
                 st.markdown(prompt)
 
             with st.chat_message("assistant"):
                 metadata_sink: list = []
-                uploaded = st.session_state.get("uploaded_image")
 
                 if st.session_state.use_streaming:
                     # --- Streaming path (SSE) ---
