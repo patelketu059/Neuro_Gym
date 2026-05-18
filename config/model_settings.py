@@ -15,25 +15,26 @@ EMBEDDING_MODEL_ID = "nvidia/llama-nemotron-embed-vl-1b-v2"
 #   AUX_MODEL         — intent classification + HyDE; lighter, higher RPM
 #   JUDGE_MODEL       — RAGAS LLM-as-judge; eval-only
 #
-# Free-tier daily limits per key (AI Studio, no billing project):
-#   gemini-2.0-flash      15 RPM / 1 500 RPD
-#   gemini-2.0-flash-lite 30 RPM / 1 500 RPD
+# Free-tier availability (AI Studio key, no billing project — May 2026):
+#   gemini-2.5-flash      free tier — RPM limited, supports ThinkingConfig
+#   gemini-2.5-flash-lite free tier — lighter fallback
 #
-# NOTE: gemini-1.5-flash and gemini-1.5-flash-8b were discontinued Feb 2025
-#       and now return 404. Do not add them back.
+# NOTE: gemini-2.0-flash and gemini-2.0-flash-lite have limit:0 on free-tier
+#       AI Studio projects (removed from free tier in 2026). Do not use as primary.
+# NOTE: gemini-1.5-x models discontinued Feb 2025 — return 404.
 
-GEMINI_GENERATION_MODEL = "gemini-2.0-flash"
+GEMINI_GENERATION_MODEL = "gemini-2.5-flash"
 
 GEMINI_FALLBACK_CHAIN: list[str] = [
-    "gemini-2.0-flash-lite",  # 30 RPM / 1 500 RPD — higher rate limit, confirmed available
-    # "gemini-2.5-flash",     # uncomment to add a paid/preview fallback at the very end
+    "gemini-2.5-flash-lite",  # lighter 2.5 variant — higher RPM on free tier
+    "gemini-2.0-flash",       # kept as last resort; may work on some free projects
 ]
 
 # Kept for any code that still imports GEMINI_FALLBACK_MODEL directly.
 GEMINI_FALLBACK_MODEL = GEMINI_FALLBACK_CHAIN[0]
 
-GEMINI_AUX_MODEL   = "gemini-2.0-flash-lite"  # query analysis + HyDE
-GEMINI_JUDGE_MODEL = "gemini-2.0-flash-lite"  # RAGAS LLM-as-judge
+GEMINI_AUX_MODEL   = "gemini-2.5-flash-lite"  # query analysis + HyDE
+GEMINI_JUDGE_MODEL = "gemini-2.5-flash-lite"  # RAGAS LLM-as-judge
 
 
 def _get_device() -> str:
