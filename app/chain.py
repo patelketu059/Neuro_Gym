@@ -11,7 +11,7 @@ from typing import Generator
 
 log = logging.getLogger(__name__)
 
-from config.model_settings import GEMINI_GENERATION_MODEL, GEMINI_FALLBACK_MODEL
+from config.model_settings import GEMINI_GENERATION_MODEL, GEMINI_FALLBACK_MODEL, GEMINI_FALLBACK_CHAIN
 from config.rag_config import (
     GENERATION_TEMPERATURE, GENERATION_MAX_TOKENS,
     THINKING_INTENTS, THINKING_BUDGET, THINKING_TEMPERATURE, THINKING_MAX_TOKENS,
@@ -194,10 +194,18 @@ def _build_gen_config(intent: str, model: str = GEMINI_GENERATION_MODEL):
 
 
 def _model_order() -> list[str]:
-    """Return [primary, fallback] deduplicated so we don't retry with the same model."""
-    if GEMINI_GENERATION_MODEL == GEMINI_FALLBACK_MODEL:
-        return [GEMINI_GENERATION_MODEL]
-    return [GEMINI_GENERATION_MODEL, GEMINI_FALLBACK_MODEL]
+    """Return the full fallback chain, deduplicated, preserving order.
+
+    Starts with GEMINI_GENERATION_MODEL then works through GEMINI_FALLBACK_CHAIN.
+    To add a paid last-resort, append it to GEMINI_FALLBACK_CHAIN in model_settings.py.
+    """
+    seen: set[str] = set()
+    result: list[str] = []
+    for m in [GEMINI_GENERATION_MODEL] + GEMINI_FALLBACK_CHAIN:
+        if m not in seen:
+            seen.add(m)
+            result.append(m)
+    return result
 
 
 # Retrieval cache keyed by (session_id, query, config, athlete_ids, levels). TTL = 5 min.
@@ -279,8 +287,10 @@ def generation(inputs: dict) -> dict:
     t0            = time.perf_counter()
     content_parts = _build_content_parts(inputs)
 
+    models   = _model_order()
     response = None
-    for model in _model_order():
+    for i, model in enumerate(models):
+        is_last = (i == len(models) - 1)
         try:
             response = gemini.models.generate_content(
                 model    = model,
@@ -289,9 +299,9 @@ def generation(inputs: dict) -> dict:
             )
             break
         except Exception as exc:
-            if model == GEMINI_FALLBACK_MODEL or not _is_rate_limit(exc):
+            if is_last or not _is_rate_limit(exc):
                 raise
-            log.warning("[chain] %s rate-limited — retrying with %s", model, GEMINI_FALLBACK_MODEL)
+            log.warning("[chain] %s exhausted — trying %s next", model, models[i + 1])
 
     answer = response.text.strip()
 
@@ -423,7 +433,9 @@ def run_chain_stream(
     total_output_tokens   = 0
     total_thinking_tokens = 0
 
-    for model in _model_order():
+    models = _model_order()
+    for i, model in enumerate(models):
+        is_last = (i == len(models) - 1)
         try:
             for chunk in gemini.models.generate_content_stream(
                 model    = model,
@@ -440,9 +452,9 @@ def run_chain_stream(
                     total_thinking_tokens = getattr(_um, "thoughts_token_count",   0) or 0
             break  # stream completed successfully
         except Exception as exc:
-            if model == GEMINI_FALLBACK_MODEL or not _is_rate_limit(exc):
+            if is_last or not _is_rate_limit(exc):
                 raise
-            log.warning("[chain] %s rate-limited — retrying stream with %s", model, GEMINI_FALLBACK_MODEL)
+            log.warning("[chain] %s exhausted — trying %s next", model, models[i + 1])
             full_answer = ""  # discard any partial tokens already yielded
 
     generation_ms = int((time.perf_counter() - t0) * 1000)
