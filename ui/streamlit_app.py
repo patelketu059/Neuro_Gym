@@ -6,6 +6,7 @@ from pathlib import Path
 
 import requests
 import streamlit as st
+import streamlit.components.v1 as _components
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -498,6 +499,34 @@ with chat_col:
                     st.markdown(msg["content"])
                     if msg["role"] == "assistant":
                         _render_assistant_payload(msg)
+            # Anchor element — JS below scrolls the container to this point
+            st.markdown('<div id="chat-bottom"></div>', unsafe_allow_html=True)
+
+    # Auto-scroll the chat container to the bottom after every render.
+    # The script walks up from the anchor to the first scrollable ancestor
+    # (the st.container with height=MESSAGE_AREA_HEIGHT) and sets scrollTop.
+    if st.session_state.messages:
+        _components.html(
+            """<script>
+            setTimeout(function () {
+                var anchor = window.parent.document.getElementById('chat-bottom');
+                if (!anchor) return;
+                var node = anchor.parentElement;
+                while (node) {
+                    var cs = window.parent.getComputedStyle(node);
+                    var oy = cs.getPropertyValue('overflow-y');
+                    var o  = cs.getPropertyValue('overflow');
+                    if ((oy === 'auto' || oy === 'scroll' || o === 'auto' || o === 'scroll')
+                            && node.scrollHeight > node.clientHeight) {
+                        node.scrollTop = node.scrollHeight;
+                        return;
+                    }
+                    node = node.parentElement;
+                }
+            }, 100);
+            </script>""",
+            height=0,
+        )
 
     # --- Chat input pinned at the bottom of the chat column ------------
     submitted = st.chat_input(
