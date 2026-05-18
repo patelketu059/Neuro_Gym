@@ -21,15 +21,22 @@ from config.rag_config import (
 _THINKING_CAPABLE = {"gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-flash-lite"}
 
 
-def _is_rate_limit(exc: Exception) -> bool:
-    """Return True when an exception signals a transient API quota / rate-limit."""
+def _should_try_next(exc: Exception) -> bool:
+    """Return True when the chain should skip to the next model rather than raising.
+
+    Covers two cases:
+    - Rate / quota exhaustion (429, RESOURCE_EXHAUSTED): transient, next model may have headroom.
+    - Model not found (404, NOT_FOUND): model was deprecated; skip it silently.
+    """
     msg = str(exc)
     return (
-        "429" in msg
+        "429"                in msg
         or "RESOURCE_EXHAUSTED" in msg
-        or "rate_limit" in msg.lower()
-        or "rate limit" in msg.lower()
-        or "quota" in msg.lower()
+        or "rate_limit"      in msg.lower()
+        or "rate limit"      in msg.lower()
+        or "quota"           in msg.lower()
+        or "404"             in msg
+        or "NOT_FOUND"       in msg
     )
 
 SYSTEM_PROMPT = """You are an expert powerlifting coach with access to a structured \
@@ -299,7 +306,7 @@ def generation(inputs: dict) -> dict:
             )
             break
         except Exception as exc:
-            if is_last or not _is_rate_limit(exc):
+            if is_last or not _should_try_next(exc):
                 raise
             log.warning("[chain] %s exhausted — trying %s next", model, models[i + 1])
 
@@ -452,7 +459,7 @@ def run_chain_stream(
                     total_thinking_tokens = getattr(_um, "thoughts_token_count",   0) or 0
             break  # stream completed successfully
         except Exception as exc:
-            if is_last or not _is_rate_limit(exc):
+            if is_last or not _should_try_next(exc):
                 raise
             log.warning("[chain] %s exhausted — trying %s next", model, models[i + 1])
             full_answer = ""  # discard any partial tokens already yielded

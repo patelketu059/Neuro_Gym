@@ -18,16 +18,15 @@ EMBEDDING_MODEL_ID = "nvidia/llama-nemotron-embed-vl-1b-v2"
 # Free-tier daily limits per key (AI Studio, no billing project):
 #   gemini-2.0-flash      15 RPM / 1 500 RPD
 #   gemini-2.0-flash-lite 30 RPM / 1 500 RPD
-#   gemini-1.5-flash      15 RPM / 1 500 RPD
-#   gemini-1.5-flash-8b   15 RPM / 1 500 RPD
+#
+# NOTE: gemini-1.5-flash and gemini-1.5-flash-8b were discontinued Feb 2025
+#       and now return 404. Do not add them back.
 
 GEMINI_GENERATION_MODEL = "gemini-2.0-flash"
 
 GEMINI_FALLBACK_CHAIN: list[str] = [
-    "gemini-2.0-flash-lite",  # 30 RPM — higher rate limit, slightly lighter
-    "gemini-1.5-flash",       # 15 RPM — proven, reliable free model
-    "gemini-1.5-flash-8b",    # 15 RPM — smallest free model, last free resort
-    # "gemini-2.5-flash",     # uncomment to add a paid fallback at the very end
+    "gemini-2.0-flash-lite",  # 30 RPM / 1 500 RPD — higher rate limit, confirmed available
+    # "gemini-2.5-flash",     # uncomment to add a paid/preview fallback at the very end
 ]
 
 # Kept for any code that still imports GEMINI_FALLBACK_MODEL directly.
