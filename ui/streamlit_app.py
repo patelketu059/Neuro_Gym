@@ -426,7 +426,7 @@ chat_col, pdf_col = st.columns([3, 2], gap="large")
 
 # === Chat column =======================================================
 with chat_col:
-    st.markdown("### NeuroGym Lifting Coach")
+    st.markdown("### Neuro Gym - Multimodal RAG Powerlifting Coach")
 
     # --- Toolbar (config / golden questions / attach image) ------------
     tb_left, tb_mid, tb_right = st.columns([3, 3, 2], gap="small")
@@ -592,7 +592,7 @@ def _pdf_viewer_fragment() -> None:
     with nav_left:
         if st.button("←", disabled=(index == 0), use_container_width=True, key="pdf_prev"):
             st.session_state.pdf_index = max(0, index - 1)
-            st.rerun()
+            # No st.rerun() — button click already triggers a fragment rerun
 
     with nav_mid:
         st.markdown(
@@ -605,20 +605,28 @@ def _pdf_viewer_fragment() -> None:
     with nav_right:
         if st.button("→", disabled=(index == n - 1), use_container_width=True, key="pdf_next"):
             st.session_state.pdf_index = min(n - 1, index + 1)
-            st.rerun()
+            # No st.rerun() — button click already triggers a fragment rerun
 
-    n_pages   = _fetch_page_count(FASTAPI_URL, pdf_paths[index])
+    n_pages    = _fetch_page_count(FASTAPI_URL, pdf_paths[index])
     if n_pages > 1:
         page_index = st.slider("Page", 0, n_pages - 1, 0, key=f"page_{index}")
     else:
         page_index = 0
         st.caption(f"Page 1 of {n_pages}")
 
+    # Fixed-height container prevents layout shift while the image loads/changes.
+    placeholder = st.empty()
     png = _render_pdf_page(FASTAPI_URL, pdf_paths[index], page=page_index)
-    if png:
-        st.image(png, use_column_width=True)
-    else:
-        st.warning(f"Could not render {pdf_paths[index]}")
+    with placeholder:
+        if png:
+            st.image(png, use_container_width=True)
+        else:
+            st.markdown(
+                "<div style='height:420px;display:flex;align-items:center;"
+                "justify-content:center;background:#1e1e1e;border-radius:8px;"
+                "color:#888;font-size:14px'>Loading PDF…</div>",
+                unsafe_allow_html=True,
+            )
 
     dot_html = "".join(
         f"<span style='display:inline-block;width:8px;height:8px;"
