@@ -1,0 +1,2 @@
+[server]
+maxUploadSize = 10   # MB — matches backend _MAX_IMAGE_BYTES (10 * 1024 * 1024)

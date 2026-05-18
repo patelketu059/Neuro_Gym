@@ -95,8 +95,12 @@ jobs:
           print("app.py written")
           PYEOF
 
+          # Copy Streamlit server config (sets maxUploadSize, etc.)
+          mkdir -p /tmp/hf-frontend/.streamlit
+          cp ui/.streamlit/config.toml /tmp/hf-frontend/.streamlit/config.toml
+
           cd /tmp/hf-frontend
-          git add app.py
+          git add app.py .streamlit/config.toml
           git diff --cached --quiet \
             && echo "No frontend changes — skipping push." \
             && exit 0
