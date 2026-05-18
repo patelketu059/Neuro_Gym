@@ -1,6 +1,4 @@
-# Neuro Gym — Full Pipeline Walkthrough
-
-> **Who this is for:** Someone taking over the project from scratch who needs to understand every moving part — from raw CSV files all the way to the live chatbot demo. No assumptions made about prior knowledge.
+# Neuro Gym — Walkthrough
 
 ---
 
