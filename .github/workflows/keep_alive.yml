@@ -1,0 +1,66 @@
+name: Keep HF Spaces alive
+
+# Pings both Spaces every 12 hours so free-tier containers never go cold.
+# Also fires on manual dispatch so you can force a wake-up instantly from
+# the GitHub Actions UI without pushing a commit.
+on:
+  schedule:
+    - cron: "0 */12 * * *"   # 00:00 and 12:00 UTC every day
+  workflow_dispatch:           # GitHub UI → Actions → "Run workflow"
+
+jobs:
+  ping:
+    name: Ping HF Spaces
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── Backend: FastAPI Docker Space ────────────────────────────────────
+      - name: Ping backend /health
+        id: backend
+        run: |
+          HTTP_CODE=$(curl -s -o /tmp/backend_body.json -w "%{http_code}" \
+            --max-time 60 \
+            https://k2p-neuro-gym-rag.hf.space/health)
+
+          echo "http_code=$HTTP_CODE" >> $GITHUB_OUTPUT
+          echo "body=$(cat /tmp/backend_body.json)" >> $GITHUB_OUTPUT
+
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "✅ Backend OK (HTTP $HTTP_CODE)"
+            cat /tmp/backend_body.json
+          else
+            echo "⚠️  Backend returned HTTP $HTTP_CODE — Space may be cold-starting."
+            exit 0   # don't fail the run; HF may just be spinning up
+          fi
+
+      # ── Frontend: Streamlit Space ─────────────────────────────────────────
+      - name: Ping frontend
+        id: frontend
+        run: |
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            --max-time 60 \
+            https://k2p-neuro-gym-ui.hf.space)
+
+          echo "http_code=$HTTP_CODE" >> $GITHUB_OUTPUT
+
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "✅ Frontend OK (HTTP $HTTP_CODE)"
+          else
+            echo "⚠️  Frontend returned HTTP $HTTP_CODE — Space may be cold-starting."
+            exit 0
+          fi
+
+      # ── Summary ───────────────────────────────────────────────────────────
+      - name: Summary
+        run: |
+          echo "### Keep-alive results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Space | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Backend (neuro-gym-rag) | HTTP ${{ steps.backend.outputs.http_code }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Frontend (neuro-gym-ui) | HTTP ${{ steps.frontend.outputs.http_code }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Backend health response:" >> $GITHUB_STEP_SUMMARY
+          echo '```json' >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.backend.outputs.body }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
